@@ -584,6 +584,27 @@ class SolidWorksAdapter(ABC):
         """
         pass
 
+    async def add_polyline(
+        self, points: list[dict[str, float]], closed: bool = False
+    ) -> "AdapterResult[Any]":
+        """Add a connected chain of line segments in one call.
+
+        Draws a segment between each consecutive pair of ``points`` (and a
+        closing segment when ``closed``), collapsing N ``add_line`` round-trips
+        into a single COM operation.
+
+        Args:
+            points (list[dict[str, float]]): Ordered ``{"x": mm, "y": mm}`` verts.
+            closed (bool): Close the contour (last point back to first).
+
+        Returns:
+            AdapterResult: ``{"segments": n, "closed": bool, "ids": [...]}`` or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_polyline is not implemented by this adapter",
+        )
+
     @abstractmethod
     async def add_circle(
         self, center_x: float, center_y: float, radius: float
@@ -943,6 +964,98 @@ class SolidWorksAdapter(ABC):
         return AdapterResult(
             status=AdapterResultStatus.ERROR,
             error="add_fillet is not implemented by this adapter",
+        )
+
+    async def delete_feature(self, name: str) -> "AdapterResult[Any]":
+        """Delete a named feature (or sketch) from the active model.
+
+        Equivalent to selecting the feature and pressing Delete in SolidWorks.
+        Child features that depend on it are removed with it.
+
+        Args:
+            name (str): Feature/sketch name, e.g. ``"Boss-Extrude3"``.
+
+        Returns:
+            AdapterResult: ``{"deleted": name}`` on success, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="delete_feature is not implemented by this adapter",
+        )
+
+    async def suppress_feature(
+        self, name: str, suppress: bool = True
+    ) -> "AdapterResult[Any]":
+        """Suppress or unsuppress a named feature (reversible, non-destructive).
+
+        Args:
+            name (str): Feature name to toggle.
+            suppress (bool): ``True`` to suppress, ``False`` to unsuppress.
+
+        Returns:
+            AdapterResult: Action summary or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="suppress_feature is not implemented by this adapter",
+        )
+
+    async def undo(self, count: int = 1) -> "AdapterResult[Any]":
+        """Undo the last ``count`` operations in the active model.
+
+        Args:
+            count (int): Number of operations to undo (>= 1).
+
+        Returns:
+            AdapterResult: ``{"undone": count}`` on success, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="undo is not implemented by this adapter",
+        )
+
+    async def create_reference_plane(
+        self,
+        reference: str,
+        offset: float = 0.0,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> "AdapterResult[Any]":
+        """Create a reference plane offset from (or angled to) an existing plane.
+
+        Args:
+            reference (str): Reference plane/face name, e.g. ``"Front Plane"``.
+            offset (float): Offset distance in millimetres.
+            angle (float): Angle in degrees (used instead of offset when non-zero).
+            flip (bool): Reverse the offset/angle direction.
+
+        Returns:
+            AdapterResult: New plane name and parameters, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_reference_plane is not implemented by this adapter",
+        )
+
+    async def mirror_feature(
+        self,
+        features: list[str],
+        mirror_plane: str,
+        merge: bool = True,
+    ) -> "AdapterResult[Any]":
+        """Mirror one or more solid features about a plane.
+
+        Args:
+            features (list[str]): Feature names to mirror.
+            mirror_plane (str): Mirror plane name, e.g. ``"Front Plane"``.
+            merge (bool): Merge the mirrored result into the existing body.
+
+        Returns:
+            AdapterResult: New mirror feature details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="mirror_feature is not implemented by this adapter",
         )
 
     @abstractmethod

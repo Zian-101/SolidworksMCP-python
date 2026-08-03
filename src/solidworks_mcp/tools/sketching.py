@@ -103,6 +103,27 @@ class AddLineInput(CompatInput):
         self.y2 = self.y2 if self.y2 is not None else self.end_y
 
 
+class AddPolylineInput(CompatInput):
+    """Input schema for adding a connected chain of line segments.
+
+    Attributes:
+        points (list[dict[str, float]]): Ordered ``{"x": mm, "y": mm}`` vertices.
+        closed (bool): Close the contour (last point back to the first).
+    """
+
+    points: list[dict[str, float]] = Field(
+        description="Ordered vertices, each {'x': mm, 'y': mm}. Segments connect consecutive points.",
+    )
+    closed: bool = Field(
+        default=False,
+        description="If true, add a closing segment from the last point back to the first.",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.points or len(self.points) < 2:
+            raise ValueError("points must contain at least 2 vertices")
+
+
 class AddCircleInput(CompatInput):
     """Input schema for adding a circle to sketch.
 
@@ -493,6 +514,56 @@ async def register_sketching_tools(
                 "status": "error",
                 "message": f"Unexpected error: {str(e)}",
             }
+
+    @mcp.tool()
+    async def add_polyline(input_data: AddPolylineInput) -> dict[str, Any]:
+        """Add many connected line segments to the sketch in ONE call.
+
+        Draws a segment between each consecutive pair of ``points`` (and a
+        closing segment back to the first when ``closed`` is true). This is the
+        fast path for polygonal profiles: it collapses what would be N separate
+        ``add_line`` calls into a single COM round-trip, avoiding per-call
+        overhead and circuit-breaker pressure.
+
+        Args:
+            input_data (AddPolylineInput): Vertices and closed flag.
+
+        Returns:
+            dict[str, Any]: Status, segment count, and created entity ids.
+
+        Example:
+            ```python
+            # Closed triangle in one call (3 segments) instead of 3 add_line calls
+            result = await add_polyline({
+                "points": [{"x": 0, "y": 0}, {"x": 50, "y": 0}, {"x": 25, "y": 40}],
+                "closed": True,
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, AddPolylineInput)
+            result = await adapter.add_polyline(input_data.points, input_data.closed)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Added polyline: {data.get('segments', 0)} segment(s)"
+                    + (" (closed)" if input_data.closed else ""),
+                    "polyline": {
+                        "segments": data.get("segments"),
+                        "closed": data.get("closed", input_data.closed),
+                        "ids": data.get("ids", []),
+                        "points": input_data.points,
+                    },
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to add polyline: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in add_polyline tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def add_circle(input_data: AddCircleInput) -> dict[str, Any]:

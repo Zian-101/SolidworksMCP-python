@@ -80,6 +80,7 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
         recovery_timeout: int = 60,
         half_open_max_calls: int = 3,
         config: dict[str, object] | None = None,
+        failure_window: float = 120.0,
     ) -> None:
         """Initialize the circuit breaker adapter.
 
@@ -105,10 +106,19 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
         self.recovery_timeout = recovery_timeout
         self.half_open_max_calls = half_open_max_calls
 
+        self.failure_window = failure_window
+
         self.state = CircuitState.CLOSED
         self.failure_count = 0
         self.last_failure_time: float = 0.0
         self.half_open_calls = 0
+
+        # Per-operation circuit state.  Keyed by tool/operation name so a
+        # known-broken operation (e.g. an unsupported COM overload) trips only
+        # its own circuit instead of blocking every other tool.  The global
+        # attributes above remain the aggregate/legacy view used by ``call()``
+        # and ``connect()``.
+        self._op_circuits: dict[str, dict[str, Any]] = {}
 
     async def _invoke_with_optional_args(
         self,
@@ -168,8 +178,14 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
         Returns:
             None: None.
         """
+        now = time.time()
+        # Rolling window: forget stale failures so sporadic errors spread over a
+        # long session cannot slowly accumulate into a spurious trip.
+        if self.last_failure_time and (now - self.last_failure_time) > self.failure_window:
+            self.failure_count = 0
+
         self.failure_count += 1
-        self.last_failure_time = time.time()
+        self.last_failure_time = now
 
         if self.state == CircuitState.HALF_OPEN:
             # Go back to open state
@@ -182,6 +198,97 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             self.state = CircuitState.OPEN
             logger.warning(
                 f"Circuit breaker opened after {self.failure_count} failures"
+            )
+
+    def _op_circuit(self, operation_name: str) -> dict[str, Any]:
+        """Return (creating if needed) the circuit state for one operation.
+
+        Args:
+            operation_name (str): Tool/operation name, e.g. ``"create_extrusion"``.
+
+        Returns:
+            dict[str, Any]: Mutable state bucket for that operation.
+        """
+        circuit = self._op_circuits.get(operation_name)
+        if circuit is None:
+            circuit = {
+                "state": CircuitState.CLOSED,
+                "failure_count": 0,
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            }
+            self._op_circuits[operation_name] = circuit
+        return circuit
+
+    def _should_allow_operation(self, operation_name: str) -> bool:
+        """Check whether one operation's circuit currently allows a call.
+
+        Mirrors :meth:`_should_allow_request` but scoped to a single operation.
+
+        Args:
+            operation_name (str): The operation being attempted.
+
+        Returns:
+            bool: ``True`` when the call may proceed.
+        """
+        circuit = self._op_circuit(operation_name)
+        state = circuit["state"]
+
+        if state == CircuitState.CLOSED:
+            return True
+        if state == CircuitState.OPEN:
+            if time.time() - circuit["last_failure_time"] >= self.recovery_timeout:
+                circuit["state"] = CircuitState.HALF_OPEN
+                circuit["half_open_calls"] = 0
+                return True
+            return False
+        # HALF_OPEN: allow a limited number of trial calls.
+        return bool(circuit["half_open_calls"] < self.half_open_max_calls)
+
+    def _record_operation_success(self, operation_name: str) -> None:
+        """Record a successful call for one operation's circuit.
+
+        Args:
+            operation_name (str): The operation that succeeded.
+        """
+        circuit = self._op_circuit(operation_name)
+        circuit["state"] = CircuitState.CLOSED
+        circuit["failure_count"] = 0
+        circuit["half_open_calls"] = 0
+
+    def _record_operation_failure(self, operation_name: str) -> None:
+        """Record a failed call for one operation's circuit.
+
+        Applies a **rolling failure window**: when the previous failure for this
+        operation is older than ``failure_window`` seconds, the accumulated
+        count is discarded first.  Without this, sporadic failures spread across
+        a long modelling session would eventually reach the threshold and trip
+        the breaker even though the operation was mostly healthy.
+
+        Args:
+            operation_name (str): The operation that failed.
+        """
+        circuit = self._op_circuit(operation_name)
+        now = time.time()
+
+        last_failure = circuit["last_failure_time"]
+        if last_failure and (now - last_failure) > self.failure_window:
+            circuit["failure_count"] = 0
+
+        circuit["failure_count"] += 1
+        circuit["last_failure_time"] = now
+
+        if circuit["state"] == CircuitState.HALF_OPEN:
+            circuit["state"] = CircuitState.OPEN
+        elif (
+            circuit["state"] == CircuitState.CLOSED
+            and circuit["failure_count"] >= self.failure_threshold
+        ):
+            circuit["state"] = CircuitState.OPEN
+            logger.warning(
+                f"Circuit breaker opened for '{operation_name}' after "
+                f"{circuit['failure_count']} failures "
+                f"(other operations remain available)"
             )
 
     async def _execute_with_circuit_breaker(
@@ -201,33 +308,47 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
         Returns:
             AdapterResult[T]: The result produced by the operation.
         """
-        if not self._should_allow_request():
+        circuit = self._op_circuit(operation_name)
+
+        if not self._should_allow_operation(operation_name):
+            retry_in = max(
+                0.0,
+                self.recovery_timeout - (time.time() - circuit["last_failure_time"]),
+            )
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,
-                error=f"Circuit breaker is {self.state.value} for {operation_name}",
-                metadata={"circuit_state": self.state.value},
+                error=(
+                    f"Circuit breaker is {circuit['state'].value} for "
+                    f"{operation_name} (retry in ~{retry_in:.0f}s; other "
+                    f"operations are unaffected)"
+                ),
+                metadata={
+                    "circuit_state": circuit["state"].value,
+                    "operation": operation_name,
+                    "retry_after_seconds": round(retry_in, 1),
+                },
             )
 
-        if self.state == CircuitState.HALF_OPEN:
-            self.half_open_calls += 1
+        if circuit["state"] == CircuitState.HALF_OPEN:
+            circuit["half_open_calls"] += 1
 
         t0 = time.time()
         try:
             result = await operation()
             latency_ms = (time.time() - t0) * 1000.0
             if result.is_success:
-                self._record_success()
+                self._record_operation_success(operation_name)
             else:
-                self._record_failure()
+                self._record_operation_failure(operation_name)
             self._soc_log(operation_name, input_dict, result, latency_ms)
             return result
         except Exception as e:
             latency_ms = (time.time() - t0) * 1000.0
-            self._record_failure()
+            self._record_operation_failure(operation_name)
             err_result: AdapterResult[T] = AdapterResult(
                 status=AdapterResultStatus.ERROR,
                 error=f"Circuit breaker caught exception in {operation_name}: {e}",
-                metadata={"circuit_state": self.state.value},
+                metadata={"circuit_state": circuit["state"].value},
             )
             self._soc_log(operation_name, input_dict, err_result, latency_ms)
             return err_result
@@ -312,11 +433,28 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
         base_health = await self.adapter.health_check()
         if base_health.metrics is None:
             base_health.metrics = {}
+        open_operations = [
+            name
+            for name, circuit in self._op_circuits.items()
+            if circuit["state"] == CircuitState.OPEN
+        ]
+
         base_health.metrics["circuit_breaker"] = {
             "state": self.state.value,
             "failure_count": self.failure_count,
             "last_failure_time": self.last_failure_time,
             "half_open_calls": self.half_open_calls,
+            "failure_window": self.failure_window,
+            "open_operations": open_operations,
+            "tracked_operations": {
+                name: {
+                    "state": circuit["state"].value,
+                    "failure_count": circuit["failure_count"],
+                }
+                for name, circuit in self._op_circuits.items()
+                if circuit["state"] != CircuitState.CLOSED
+                or circuit["failure_count"]
+            },
         }
 
         # Consider circuit as unhealthy if open
@@ -532,6 +670,70 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"radius": radius, "edge_names": edge_names},
         )
 
+    async def delete_feature(self, name: str) -> AdapterResult[dict[str, Any]]:
+        """Delete a feature through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "delete_feature",
+            lambda: self.adapter.delete_feature(name),
+            input_dict={"name": name},
+        )
+
+    async def suppress_feature(
+        self, name: str, suppress: bool = True
+    ) -> AdapterResult[dict[str, Any]]:
+        """Suppress/unsuppress a feature through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "suppress_feature",
+            lambda: self.adapter.suppress_feature(name, suppress),
+            input_dict={"name": name, "suppress": suppress},
+        )
+
+    async def undo(self, count: int = 1) -> AdapterResult[dict[str, Any]]:
+        """Undo recent operations through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "undo",
+            lambda: self.adapter.undo(count),
+            input_dict={"count": count},
+        )
+
+    async def create_reference_plane(
+        self,
+        reference: str,
+        offset: float = 0.0,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Create a reference plane through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "create_reference_plane",
+            lambda: self.adapter.create_reference_plane(
+                reference, offset, angle, flip
+            ),
+            input_dict={
+                "reference": reference,
+                "offset": offset,
+                "angle": angle,
+                "flip": flip,
+            },
+        )
+
+    async def mirror_feature(
+        self,
+        features: list[str],
+        mirror_plane: str,
+        merge: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mirror features through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "mirror_feature",
+            lambda: self.adapter.mirror_feature(features, mirror_plane, merge),
+            input_dict={
+                "features": features,
+                "mirror_plane": mirror_plane,
+                "merge": merge,
+            },
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:
@@ -618,6 +820,16 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             "add_line",
             lambda: self.adapter.add_line(x1, y1, x2, y2),
             input_dict={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        )
+
+    async def add_polyline(
+        self, points: list[dict[str, float]], closed: bool = False
+    ) -> AdapterResult[dict[str, Any]]:
+        """Add a connected polyline through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "add_polyline",
+            lambda: self.adapter.add_polyline(points, closed),
+            input_dict={"points": points, "closed": closed},
         )
 
     async def add_centerline(

@@ -270,6 +270,9 @@ class AdapterFactory:
             failure_threshold=config.circuit_breaker_threshold,
             recovery_timeout=config.circuit_breaker_timeout,
             half_open_max_calls=3,
+            failure_window=getattr(
+                config, "circuit_breaker_failure_window", 120.0
+            ),
         )
 
     def _wrap_with_connection_pool(

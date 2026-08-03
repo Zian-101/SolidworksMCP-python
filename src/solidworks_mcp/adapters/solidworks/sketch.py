@@ -107,6 +107,11 @@ class SolidWorksSketchMixin:
     ) -> AdapterResult[str]:
         return _add_line_impl(self, x1, y1, x2, y2)
 
+    async def add_polyline(
+        self, points: list[dict[str, float]], closed: bool = False
+    ) -> AdapterResult[dict[str, Any]]:
+        return _add_polyline_impl(self, points, closed)
+
     async def add_circle(
         self, center_x: float, center_y: float, radius: float
     ) -> AdapterResult[str]:
@@ -424,6 +429,93 @@ def _add_line_impl(
 
     return cast(
         AdapterResult[str], adapter._handle_com_operation("add_line", _line_operation)
+    )
+
+
+def _add_polyline_impl(
+    adapter: Any, points: list[dict[str, float]], closed: bool
+) -> AdapterResult[dict[str, Any]]:
+    """Add a connected chain of line segments to the active sketch in one call.
+
+    Draws a segment between each consecutive pair of ``points`` (and, when
+    ``closed`` is true, one more from the last point back to the first) using
+    repeated ``SketchManager.CreateLine`` calls **inside a single COM
+    operation**. This collapses what would otherwise be N separate ``add_line``
+    round-trips (each with executor + circuit-breaker overhead) into one — the
+    big efficiency win for polygon/profile-heavy sketching.
+
+    Each created segment is registered in the sketch-entity registry exactly
+    like :func:`_add_line_impl`, so the returned IDs remain usable for later
+    dimension/constraint calls.
+
+    Args:
+        adapter: A ``PyWin32Adapter`` with an open sketch
+            (``currentSketchManager`` must be non-``None``).
+        points: Ordered vertices, each ``{"x": mm, "y": mm}``. At least two are
+            required (three when ``closed`` for a meaningful loop).
+        closed: When ``True``, append a closing segment from the last vertex to
+            the first, producing a closed contour.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: On success, ``data`` is
+        ``{"segments": n, "closed": bool, "ids": [...]}``. On failure,
+        ``status`` is ``ERROR``.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation`` when any
+            ``CreateLine`` returns ``None``.
+
+    Example::
+
+        pts = [{"x": 0, "y": 0}, {"x": 50, "y": 0}, {"x": 50, "y": 30}]
+        result = await adapter.add_polyline(pts, closed=True)
+        print(result.data["segments"])  # 3
+    """
+    if not adapter.currentSketchManager:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active sketch")
+
+    pts = [
+        (float(p.get("x", 0.0)), float(p.get("y", 0.0)))
+        for p in (points or [])
+    ]
+    if len(pts) < 2:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_polyline requires at least 2 points",
+        )
+
+    def _polyline_operation() -> dict[str, Any]:
+        """Inner COM closure that creates every segment in one round-trip.
+
+        Returns:
+            dict[str, Any]: Segment count, closed flag, and registered IDs.
+
+        Raises:
+            Exception: If any ``CreateLine`` returns ``None``.
+        """
+        segments = list(zip(pts, pts[1:]))
+        if closed and len(pts) >= 3:
+            segments.append((pts[-1], pts[0]))
+
+        ids: list[str] = []
+        for (sx, sy), (ex, ey) in segments:
+            line = adapter.currentSketchManager.CreateLine(
+                sx / 1000.0, sy / 1000.0, 0, ex / 1000.0, ey / 1000.0, 0
+            )
+            if not line:
+                raise Exception(
+                    f"Failed to create polyline segment ({sx},{sy})->({ex},{ey})"
+                )
+            reg = adapter._register_sketch_entity("Line", line)
+            # _register_sketch_entity returns an AdapterResult; keep the id when present.
+            entity_id = getattr(reg, "data", reg)
+            ids.append(str(entity_id))
+
+        return {"segments": len(segments), "closed": bool(closed), "ids": ids}
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("add_polyline", _polyline_operation),
     )
 
 

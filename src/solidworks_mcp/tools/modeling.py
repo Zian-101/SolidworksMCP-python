@@ -367,6 +367,96 @@ class AddFilletInput(CompatInput):
             raise ValueError("radius must be positive")
 
 
+class DeleteFeatureInput(CompatInput):
+    """Input schema for deleting a feature or sketch.
+
+    Attributes:
+        name (str): Feature/sketch name to delete, e.g. ``"Boss-Extrude3"``.
+    """
+
+    name: str = Field(description="Feature or sketch name to delete, e.g. 'Boss-Extrude3'")
+
+
+class SuppressFeatureInput(CompatInput):
+    """Input schema for suppressing/unsuppressing a feature.
+
+    Attributes:
+        name (str): Feature name to toggle.
+        suppress (bool): True to suppress, False to unsuppress.
+    """
+
+    name: str = Field(description="Feature name to suppress or unsuppress")
+    suppress: bool = Field(
+        default=True,
+        description="True to suppress (hide/roll out), False to unsuppress",
+    )
+
+
+class CreateReferencePlaneInput(CompatInput):
+    """Input schema for creating a reference plane.
+
+    Attributes:
+        reference (str): Reference plane/face name to offset from.
+        offset (float): Offset distance in millimetres.
+        angle (float): Angle in degrees (used instead of offset when non-zero).
+        flip (bool): Reverse the offset/angle direction.
+    """
+
+    reference: str = Field(
+        default="Front Plane",
+        description="Reference plane or planar face name, e.g. 'Front Plane' or 'Plane2'",
+    )
+    offset: float = Field(
+        default=0.0, description="Offset distance in mm from the reference plane"
+    )
+    angle: float = Field(
+        default=0.0,
+        description="Angle in degrees; used instead of offset when non-zero",
+    )
+    flip: bool = Field(
+        default=False, description="Reverse the offset/angle direction"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.offset and not self.angle:
+            raise ValueError("provide a non-zero offset or angle")
+
+
+class MirrorFeatureInput(CompatInput):
+    """Input schema for mirroring solid features about a plane.
+
+    Attributes:
+        features (list[str]): Feature names to mirror.
+        mirror_plane (str): Mirror plane name.
+        merge (bool): Merge the mirrored result into the existing body.
+    """
+
+    features: list[str] = Field(
+        description="Feature names to mirror, e.g. ['Boss-Extrude110']"
+    )
+    mirror_plane: str = Field(
+        default="Front Plane",
+        description="Mirror plane or planar face name, e.g. 'Front Plane'",
+    )
+    merge: bool = Field(
+        default=True, description="Merge the mirrored result into the existing body"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.features:
+            raise ValueError("features must contain at least one feature name")
+
+
+class UndoInput(CompatInput):
+    """Input schema for undoing recent operations.
+
+    Attributes:
+        count (int): Number of operations to undo (>= 1).
+    """
+
+    count: int = Field(default=1, description="Number of operations to undo (>= 1)")
+
+
 class CreateAssemblyInput(CompatInput):
     """Input schema for creating a new assembly.
 
@@ -1099,6 +1189,218 @@ async def register_modeling_tools(
                 }
         except Exception as e:
             logger.error(f"Error in add_fillet tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def delete_feature(input_data: DeleteFeatureInput) -> dict[str, Any]:
+        """Delete a feature or sketch from the active model by name.
+
+        Equivalent to selecting the feature in the tree and pressing Delete.
+        Features that depend on it are removed with it (SolidWorks' normal
+        cascade). Use this to fix a mistake without rebuilding from scratch.
+
+        Args:
+            input_data (DeleteFeatureInput): The feature/sketch name to delete.
+
+        Returns:
+            dict[str, Any]: Status and the deleted feature name.
+
+        Example:
+            ```python
+            result = await delete_feature({"name": "Boss-Extrude3"})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, DeleteFeatureInput)
+            result = await adapter.delete_feature(input_data.name)
+            if result.is_success:
+                return {
+                    "status": "success",
+                    "message": f"Deleted feature: {input_data.name}",
+                    "deleted": input_data.name,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to delete feature: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in delete_feature tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def create_reference_plane(
+        input_data: CreateReferencePlaneInput,
+    ) -> dict[str, Any]:
+        """Create a reference plane offset from (or angled to) an existing plane.
+
+        Removes the limitation that sketches can only be placed on the six
+        built-in planes. Use this to make an offset plane (e.g. 2 mm in front of
+        the Front Plane) and then pass its name to ``create_sketch``.
+
+        Args:
+            input_data (CreateReferencePlaneInput): Reference name, offset/angle, flip.
+
+        Returns:
+            dict[str, Any]: Status and the new plane's name.
+
+        Example:
+            ```python
+            # Plane 2 mm off the Front Plane, then sketch on it
+            r = await create_reference_plane({"reference": "Front Plane", "offset": 2.0})
+            await create_sketch({"plane": r["plane"]["name"]})
+
+            # Plane angled 30 degrees off the Right Plane
+            await create_reference_plane({"reference": "Right Plane", "angle": 30})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, CreateReferencePlaneInput)
+            result = await adapter.create_reference_plane(
+                input_data.reference,
+                input_data.offset,
+                input_data.angle,
+                input_data.flip,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Created reference plane: {data.get('name', 'Plane')}",
+                    "plane": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to create reference plane: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in create_reference_plane tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def mirror_feature(input_data: MirrorFeatureInput) -> dict[str, Any]:
+        """Mirror one or more solid features about a plane.
+
+        Creates a real mirror feature (Insert > Pattern/Mirror > Mirror), so a
+        symmetric half only needs to be modelled once. Previously only sketch
+        entities could be mirrored, forcing solid features to be mirrored by
+        hand in the SolidWorks UI.
+
+        Args:
+            input_data (MirrorFeatureInput): Features, mirror plane, merge flag.
+
+        Returns:
+            dict[str, Any]: Status and the new mirror feature details.
+
+        Example:
+            ```python
+            # Mirror a shell half to the other side of the Front Plane
+            await mirror_feature({
+                "features": ["Boss-Extrude110"],
+                "mirror_plane": "Front Plane",
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, MirrorFeatureInput)
+            result = await adapter.mirror_feature(
+                input_data.features, input_data.mirror_plane, input_data.merge
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Mirrored {len(input_data.features)} feature(s) about "
+                        f"{input_data.mirror_plane}"
+                    ),
+                    "mirror": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to mirror feature: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in mirror_feature tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def suppress_feature(input_data: SuppressFeatureInput) -> dict[str, Any]:
+        """Suppress or unsuppress a feature by name (reversible, non-destructive).
+
+        Suppressing rolls a feature (and its children) out of the model without
+        deleting it — the safe way to turn a bad feature off and back on.
+
+        Args:
+            input_data (SuppressFeatureInput): Feature name and suppress flag.
+
+        Returns:
+            dict[str, Any]: Status and the action performed.
+
+        Example:
+            ```python
+            await suppress_feature({"name": "Fillet2", "suppress": True})   # hide
+            await suppress_feature({"name": "Fillet2", "suppress": False})  # restore
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, SuppressFeatureInput)
+            result = await adapter.suppress_feature(
+                input_data.name, input_data.suppress
+            )
+            if result.is_success:
+                verb = "Suppressed" if input_data.suppress else "Unsuppressed"
+                return {
+                    "status": "success",
+                    "message": f"{verb} feature: {input_data.name}",
+                    "feature": input_data.name,
+                    "suppressed": input_data.suppress,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to change suppression: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in suppress_feature tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def undo(input_data: UndoInput) -> dict[str, Any]:
+        """Undo the last N operations in the active model.
+
+        Steps the model back without rebuilding from scratch. Defaults to a
+        single undo.
+
+        Args:
+            input_data (UndoInput): Number of operations to undo.
+
+        Returns:
+            dict[str, Any]: Status and the number of operations undone.
+
+        Example:
+            ```python
+            await undo({"count": 1})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, UndoInput)
+            result = await adapter.undo(input_data.count)
+            if result.is_success:
+                return {
+                    "status": "success",
+                    "message": f"Undid {input_data.count} operation(s)",
+                    "undone": input_data.count,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to undo: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in undo tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

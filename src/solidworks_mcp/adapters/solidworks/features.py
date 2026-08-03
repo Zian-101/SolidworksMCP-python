@@ -55,6 +55,34 @@ class SolidWorksFeaturesMixin:
     ) -> AdapterResult[SolidWorksFeature]:
         return _add_chamfer_impl(self, distance, edge_names)
 
+    async def delete_feature(self, name: str) -> AdapterResult[dict[str, Any]]:
+        return _delete_feature_impl(self, name)
+
+    async def suppress_feature(
+        self, name: str, suppress: bool = True
+    ) -> AdapterResult[dict[str, Any]]:
+        return _suppress_feature_impl(self, name, suppress)
+
+    async def undo(self, count: int = 1) -> AdapterResult[dict[str, Any]]:
+        return _undo_impl(self, count)
+
+    async def create_reference_plane(
+        self,
+        reference: str,
+        offset: float = 0.0,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _create_reference_plane_impl(self, reference, offset, angle, flip)
+
+    async def mirror_feature(
+        self,
+        features: list[str],
+        mirror_plane: str,
+        merge: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _mirror_feature_impl(self, features, mirror_plane, merge)
+
 
 def _create_extrusion_impl(
     adapter: Any, params: ExtrusionParameters
@@ -1341,4 +1369,465 @@ def _add_chamfer_impl(
     return cast(
         AdapterResult[SolidWorksFeature],
         adapter._handle_com_operation("add_chamfer", _chamfer_operation),
+    )
+
+
+def _select_feature_by_name(adapter: Any, name: str) -> bool:
+    """Select a feature or sketch by name for an edit operation.
+
+    Resolves the entity with ``IModelDoc2::FeatureByName`` and selects it with
+    ``IFeature::Select2(False, 0)`` — the same reliable path used elsewhere in
+    this adapter (avoids ``SelectByID2`` entity-type strings, which raise
+    ``Type mismatch`` on some SW builds and differ for sketches vs solid
+    features). Any ``name@document`` qualifier is stripped before lookup.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+        name: Feature or sketch name (e.g. ``"Boss-Extrude3"`` or ``"Sketch5"``).
+
+    Returns:
+        bool: ``True`` when the entity was found and selected.
+    """
+    bare = name.split("@", 1)[0]
+    adapter._attempt(lambda: adapter.currentModel.ClearSelection2(True), default=None)
+    feature = adapter._attempt(
+        lambda: adapter.currentModel.FeatureByName(bare), default=None
+    )
+    if not feature:
+        return False
+    return bool(adapter._attempt(lambda: feature.Select2(False, 0), default=False))
+
+
+def _delete_feature_impl(adapter: Any, name: str) -> AdapterResult[dict[str, Any]]:
+    """Delete a named feature (or sketch) from the active model.
+
+    Selects the feature via :func:`_select_feature_by_name`, then removes it with
+    ``IModelDoc2::EditDelete``. Deleting a parent feature also removes its
+    children (SolidWorks' normal cascade), which is the intended "erase this and
+    what depends on it" behaviour.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a non-``None`` ``currentModel``.
+        name: Name of the feature/sketch to delete.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: ``data`` = ``{"deleted": name}`` on success;
+        ``status`` ``ERROR`` when the model is missing or the feature is not found.
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    def _delete_operation() -> dict[str, Any]:
+        if not _select_feature_by_name(adapter, name):
+            raise Exception(f"Feature not found: {name}")
+        deleted = adapter._attempt(
+            lambda: adapter.currentModel.EditDelete(), default=None
+        )
+        # EditDelete returns void on some builds; treat "no exception" as success
+        # but confirm the feature is gone to avoid a false positive.
+        still_there = adapter._attempt(
+            lambda: adapter.currentModel.FeatureByName(name.split("@", 1)[0]),
+            default=None,
+        )
+        if still_there:
+            raise Exception(f"EditDelete did not remove feature: {name}")
+        return {"deleted": name, "result": bool(deleted) if deleted is not None else True}
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("delete_feature", _delete_operation),
+    )
+
+
+def _suppress_feature_impl(
+    adapter: Any, name: str, suppress: bool
+) -> AdapterResult[dict[str, Any]]:
+    """Suppress or unsuppress a named feature in the active model.
+
+    Selects the feature, then calls ``IModelDoc2::EditSuppress2`` (suppress) or
+    ``EditUnsuppress2`` (unsuppress) on the selection. Suppressing rolls the
+    feature (and its children) out of the model without deleting it — the safe,
+    reversible way to "turn off" a bad feature.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+        name: Feature name to toggle.
+        suppress: ``True`` to suppress, ``False`` to unsuppress.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: ``data`` describes the action; ``ERROR``
+        when the model is missing, the feature is absent, or the COM call fails.
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    def _suppress_operation() -> dict[str, Any]:
+        if not _select_feature_by_name(adapter, name):
+            raise Exception(f"Feature not found: {name}")
+        if suppress:
+            ok, err = adapter._attempt_with_error(
+                lambda: adapter.currentModel.EditSuppress2()
+            )
+        else:
+            ok, err = adapter._attempt_with_error(
+                lambda: adapter.currentModel.EditUnsuppress2()
+            )
+        if err is not None:
+            raise Exception(
+                f"Failed to {'suppress' if suppress else 'unsuppress'} {name}: {err}"
+            )
+        return {"feature": name, "suppressed": suppress}
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("suppress_feature", _suppress_operation),
+    )
+
+
+def _undo_impl(adapter: Any, count: int) -> AdapterResult[dict[str, Any]]:
+    """Undo the last ``count`` operations in the active model.
+
+    Calls ``IModelDoc2::EditUndo2(count)``, falling back to the older
+    ``EditUndo(count)`` signature on builds that lack the 2-suffix overload.
+    Lets an agent step back a bad feature without rebuilding from scratch.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+        count: Number of operations to undo (>= 1).
+
+    Returns:
+        AdapterResult[dict[str, Any]]: ``data`` = ``{"undone": count}`` on success.
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    n = max(1, int(count))
+
+    def _undo_operation() -> dict[str, Any]:
+        result, err = adapter._attempt_with_error(
+            lambda: adapter.currentModel.EditUndo2(n)
+        )
+        if err is not None:
+            result, err2 = adapter._attempt_with_error(
+                lambda: adapter.currentModel.EditUndo(n)
+            )
+            if err2 is not None:
+                raise Exception(f"Undo failed: {err} | legacy: {err2}")
+        return {"undone": n}
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("undo", _undo_operation),
+    )
+
+
+# swRefPlaneReferenceConstraints_e values used by _create_reference_plane_impl.
+_REF_PLANE_DISTANCE = 8
+_REF_PLANE_ANGLE = 16
+_REF_PLANE_OPTION_FLIP = 256
+
+
+def _create_reference_plane_impl(
+    adapter: Any,
+    reference: str,
+    offset: float,
+    angle: float,
+    flip: bool,
+) -> AdapterResult[dict[str, Any]]:
+    """Create a reference plane offset from (or angled to) an existing plane/face.
+
+    Wraps ``IFeatureManager::InsertRefPlane``.  Per the SolidWorks API contract,
+    the reference entity must first be selected under **mark 0**; this is done
+    with ``IModelDocExtension::SelectByID2``, trying entity type ``"PLANE"``
+    first and falling back to ``"FACE"`` so either a datum plane or a planar
+    model face can be used as the reference.
+
+    Constraint selection:
+
+    * ``offset`` non-zero → ``swRefPlaneReferenceConstraint_Distance`` (8)
+    * ``angle`` non-zero  → ``swRefPlaneReferenceConstraint_Angle`` (16)
+    * ``flip`` → OR-ed with ``swRefPlaneReferenceConstraint_OptionFlip`` (256)
+
+    This removes the long-standing gap where sketches could only be placed on
+    the six built-in planes, forcing offset planes to be created by hand in the
+    SolidWorks UI.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        reference: Name of the reference plane or planar face, e.g.
+            ``"Front Plane"`` or ``"Plane18"``.
+        offset: Offset distance in **millimetres** (converted to metres).
+        angle: Angle in **degrees**; used instead of ``offset`` when non-zero.
+        flip: Reverse the offset/angle direction.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: ``data`` contains the new plane's name
+        plus the parameters used.  ``ERROR`` when the reference cannot be
+        selected or the COM call returns ``None``.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # Plane 2 mm in front of the Front Plane
+        await adapter.create_reference_plane("Front Plane", offset=2.0)
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    if not reference:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_reference_plane requires a reference plane/face name",
+        )
+
+    if not offset and not angle:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_reference_plane requires a non-zero offset or angle",
+        )
+
+    def _plane_operation() -> dict[str, Any]:
+        """Inner COM closure: select the reference, then insert the plane."""
+        import math
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        # The reference entity must be selected under mark 0.  Prefer
+        # FeatureByName + Select2 (reliable across builds -- SelectByID2 raises
+        # "Type mismatch" on some SolidWorks versions), then fall back to
+        # SelectByID2 for planar faces that are not named tree features.
+        selected = _select_named_feature(adapter, reference, 0, append=False)
+        if not selected:
+            for entity_type in ("PLANE", "FACE"):
+                selected = bool(
+                    adapter._attempt(
+                        lambda t=entity_type: adapter.currentModel.Extension.SelectByID2(
+                            reference, t, 0.0, 0.0, 0.0, False, 0, None, 0
+                        ),
+                        default=False,
+                    )
+                )
+                if selected:
+                    break
+
+        if not selected:
+            raise Exception(
+                f"Failed to select reference plane/face: {reference}. "
+                "Use an existing plane name (e.g. 'Front Plane') or planar face."
+            )
+
+        if angle:
+            constraint = _REF_PLANE_ANGLE
+            value = math.radians(float(angle))
+        else:
+            constraint = _REF_PLANE_DISTANCE
+            value = float(offset) / 1000.0
+
+        if flip:
+            constraint |= _REF_PLANE_OPTION_FLIP
+
+        feature_manager = adapter.currentModel.FeatureManager
+        plane = feature_manager.InsertRefPlane(constraint, value, 0, 0.0, 0, 0.0)
+
+        if not plane:
+            raise Exception(
+                f"InsertRefPlane returned no plane for reference '{reference}'"
+            )
+
+        plane_name = adapter._attempt(
+            lambda: adapter._get_attr_or_call(plane, "Name"), default=None
+        )
+        if not plane_name:
+            # RefPlane objects expose their name via the owning feature.
+            plane_name = "Plane"
+
+        return {
+            "name": str(plane_name),
+            "reference": reference,
+            "offset": offset,
+            "angle": angle,
+            "flip": flip,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("create_reference_plane", _plane_operation),
+    )
+
+
+def _mirror_feature_impl(
+    adapter: Any,
+    features: list[str],
+    mirror_plane: str,
+    merge: bool,
+) -> AdapterResult[dict[str, Any]]:
+    """Mirror one or more solid features about a plane.
+
+    Wraps ``IFeatureManager::InsertMirrorFeature``.  Per the SolidWorks API
+    contract the entities must be preselected under specific marks:
+
+    * **mark 1** — each feature to be mirrored
+    * **mark 2** — the mirror plane (or planar face)
+
+    Features are resolved with ``FeatureByName`` + ``Select2`` (robust across
+    builds); the plane falls back to ``SelectByID2`` with ``"PLANE"``/``"FACE"``
+    when it is not a named tree feature.
+
+    Previously only *sketch* mirroring existed, so mirroring a solid feature
+    (e.g. the second half of a shell) had to be done by hand in the UI.
+
+    **Scope (verified on SW 2025):** feature mirroring resolves when the
+    mirrored feature's sketch sits on — or passes through — the mirror plane
+    (volume doubles, confirmed).  A feature built on a *different* plane offset
+    from the mirror plane cannot be resolved as a feature mirror by SolidWorks;
+    the COM call still returns a Feature object but produces no geometry, so
+    this function verifies the model volume actually grew and raises an
+    explanatory error rather than reporting a false success.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        features: Names of the features to mirror, e.g. ``["Boss-Extrude110"]``.
+        mirror_plane: Mirror plane name, e.g. ``"Front Plane"``.
+        merge: Merge the mirrored result into the existing body.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: ``data`` describes the new mirror
+        feature.  ``ERROR`` when a selection fails or the COM call returns
+        ``None``.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        await adapter.mirror_feature(["Boss-Extrude110"], "Front Plane")
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    feature_names = [f for f in (features or []) if f]
+    if not feature_names:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="mirror_feature requires at least one feature name",
+        )
+    if not mirror_plane:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="mirror_feature requires a mirror plane name",
+        )
+
+    def _volume() -> float:
+        """Return the model's total volume, or 0.0 when unavailable.
+
+        Used to prove the mirror actually produced geometry.  ``InsertMirrorFeature``
+        can return a non-``None`` Feature while silently mirroring nothing, so the
+        COM return value alone must never be treated as success.
+        """
+        adapter._attempt(
+            lambda: adapter.currentModel.ForceRebuild3(False), default=None
+        )
+        mass_props = adapter._attempt(
+            lambda: adapter.currentModel.Extension.CreateMassProperty(),
+            default=None,
+        )
+        if mass_props:
+            volume = adapter._attempt(lambda: mass_props.Volume, default=None)
+            try:
+                if volume is not None:
+                    return float(volume)
+            except (TypeError, ValueError):
+                pass
+
+        # Fallback used by get_mass_properties(): IModelDoc2::GetMassProperties
+        # is exposed as a tuple property on some builds and a method on others.
+        gmp = getattr(adapter.currentModel, "GetMassProperties", None)
+        raw = adapter._attempt(gmp, default=None) if callable(gmp) else gmp
+        try:
+            if isinstance(raw, (list, tuple)) and len(raw) > 3:
+                return float(raw[3])
+        except (TypeError, ValueError):
+            pass
+        return 0.0
+
+    def _mirror_operation() -> dict[str, Any]:
+        """Inner COM closure: select features (mark 1) + plane (mark 2), mirror."""
+        volume_before = _volume()
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        # Features to mirror -> mark 1 (first replaces selection, rest append).
+        for index, name in enumerate(feature_names):
+            if not _select_named_feature(adapter, name, 1, append=index > 0):
+                raise Exception(f"Failed to select feature to mirror: {name}")
+
+        # Mirror plane -> mark 2.  Try the feature-tree path first, then
+        # SelectByID2 for built-in planes / planar faces.
+        plane_selected = _select_named_feature(adapter, mirror_plane, 2, append=True)
+        if not plane_selected:
+            for entity_type in ("PLANE", "FACE"):
+                plane_selected = bool(
+                    adapter._attempt(
+                        lambda t=entity_type: adapter.currentModel.Extension.SelectByID2(
+                            mirror_plane, t, 0.0, 0.0, 0.0, True, 2, None, 0
+                        ),
+                        default=False,
+                    )
+                )
+                if plane_selected:
+                    break
+        if not plane_selected:
+            raise Exception(f"Failed to select mirror plane: {mirror_plane}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.InsertMirrorFeature(
+            False,  # BMirrorBody - False mirrors a feature/face, not a body
+            False,  # BGeometryPattern - solve the whole feature
+            bool(merge),  # BMerge
+            False,  # BKnit
+        )
+
+        if not feature:
+            raise Exception(
+                "InsertMirrorFeature returned no feature "
+                f"(features={feature_names}, plane={mirror_plane})"
+            )
+
+        # Never trust the COM return value alone: verify real geometry appeared.
+        volume_after = _volume()
+        if volume_before and volume_after <= volume_before * 1.001:
+            raise Exception(
+                "Mirror produced no new geometry "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                "SolidWorks returned a feature but mirrored nothing. Feature "
+                "mirroring only resolves when the mirrored feature's own sketch "
+                "sits on (or passes through) the mirror plane. Here "
+                f"{feature_names} appears to be built on a different/offset "
+                f"plane relative to '{mirror_plane}', which SolidWorks cannot "
+                "resolve as a feature mirror. Either mirror about the feature's "
+                "own sketch plane, or mirror the solid body manually via "
+                "Insert > Pattern/Mirror > Mirror (Bodies to Mirror)."
+            )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="Mirror",
+                )
+            ),
+            "mirrored_features": feature_names,
+            "mirror_plane": mirror_plane,
+            "merge": bool(merge),
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("mirror_feature", _mirror_operation),
     )

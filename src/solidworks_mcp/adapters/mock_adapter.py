@@ -842,6 +842,43 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def add_polyline(
+        self, points: list[dict[str, float]], closed: bool = False
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock adding a connected chain of line segments in one call.
+
+        Args:
+            points (list[dict[str, float]]): Ordered vertices.
+            closed (bool): Close the contour.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Segment count, closed flag, and ids.
+        """
+        if not self._current_sketch:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active sketch"
+            )
+        if not points or len(points) < 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="add_polyline requires at least 2 points",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        n = len(points) - 1 + (1 if closed and len(points) >= 3 else 0)
+        ids: list[str] = []
+        for _ in range(n):
+            self._operation_count += 1
+            line_id = f"Line{random.randint(1000, 9999)}"
+            self._sketch_entity_ids.add(line_id)
+            ids.append(line_id)
+
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"segments": n, "closed": bool(closed), "ids": ids},
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
     async def add_centerline(
         self, x1: float, y1: float, x2: float, y2: float
     ) -> AdapterResult[str]:
@@ -1440,6 +1477,130 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
         return AdapterResult(
             status=AdapterResultStatus.SUCCESS,
             data=None,
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
+    async def delete_feature(self, name: str) -> AdapterResult[dict[str, Any]]:
+        """Mock deleting a feature by name.
+
+        Args:
+            name (str): Feature/sketch name to delete.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Success payload echoing the name.
+        """
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"deleted": name},
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
+    async def suppress_feature(
+        self, name: str, suppress: bool = True
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock suppressing/unsuppressing a feature.
+
+        Args:
+            name (str): Feature name to toggle.
+            suppress (bool): True to suppress, False to unsuppress.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Success payload.
+        """
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"feature": name, "suppressed": suppress},
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
+    async def undo(self, count: int = 1) -> AdapterResult[dict[str, Any]]:
+        """Mock undo of recent operations.
+
+        Args:
+            count (int): Number of operations to undo.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Success payload.
+        """
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"undone": max(1, int(count))},
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
+    async def create_reference_plane(
+        self,
+        reference: str,
+        offset: float = 0.0,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock creating a reference plane.
+
+        Args:
+            reference (str): Reference plane/face name.
+            offset (float): Offset distance in mm.
+            angle (float): Angle in degrees.
+            flip (bool): Reverse direction.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: New plane payload.
+        """
+        if not offset and not angle:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="create_reference_plane requires a non-zero offset or angle",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Plane{random.randint(1, 99)}",
+                "reference": reference,
+                "offset": offset,
+                "angle": angle,
+                "flip": flip,
+            },
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
+    async def mirror_feature(
+        self,
+        features: list[str],
+        mirror_plane: str,
+        merge: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock mirroring features about a plane.
+
+        Args:
+            features (list[str]): Feature names to mirror.
+            mirror_plane (str): Mirror plane name.
+            merge (bool): Merge result flag.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Mirror feature payload.
+        """
+        if not features:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="mirror_feature requires at least one feature name",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Mirror{random.randint(1, 99)}",
+                "mirrored_features": list(features),
+                "mirror_plane": mirror_plane,
+                "merge": merge,
+            },
             execution_time=self._delays["sketch_operation"] / 2,
         )
 

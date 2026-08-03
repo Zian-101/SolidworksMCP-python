@@ -294,11 +294,23 @@ class SolidWorksMCPConfig(BaseModel):
     )
 
     circuit_breaker_threshold: int = Field(
-        default=5, description="Circuit breaker failure threshold"
+        default=8,
+        description="Circuit breaker failure threshold (consecutive failures before opening). "
+        "Raised from 5 → 8 so transient COM/RPC hiccup bursts during long "
+        "sketch/feature sequences don't trip the breaker; a single success resets the count.",
     )
 
     circuit_breaker_timeout: int = Field(
-        default=60, description="Circuit breaker timeout in seconds"
+        default=25,
+        description="Circuit breaker recovery timeout in seconds before a half-open retry. "
+        "Lowered from 60 → 25 so the breaker recovers faster after a transient trip.",
+    )
+
+    circuit_breaker_failure_window: float = Field(
+        default=120.0,
+        description="Rolling window in seconds for counting circuit-breaker failures. "
+        "Failures older than this are forgotten, so sporadic errors spread across a long "
+        "modelling session cannot slowly accumulate into a spurious trip.",
     )
 
     # === Additional Test Configuration Fields ===

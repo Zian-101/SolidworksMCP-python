@@ -619,6 +619,54 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             "add_fillet", lambda adapter: adapter.add_fillet(radius, edge_names)
         )
 
+    async def delete_feature(self, name: str) -> AdapterResult[dict[str, Any]]:
+        """Delete a feature using pool."""
+        return await self._execute_with_pool(
+            "delete_feature", lambda adapter: adapter.delete_feature(name)
+        )
+
+    async def suppress_feature(
+        self, name: str, suppress: bool = True
+    ) -> AdapterResult[dict[str, Any]]:
+        """Suppress/unsuppress a feature using pool."""
+        return await self._execute_with_pool(
+            "suppress_feature",
+            lambda adapter: adapter.suppress_feature(name, suppress),
+        )
+
+    async def undo(self, count: int = 1) -> AdapterResult[dict[str, Any]]:
+        """Undo recent operations using pool."""
+        return await self._execute_with_pool(
+            "undo", lambda adapter: adapter.undo(count)
+        )
+
+    async def create_reference_plane(
+        self,
+        reference: str,
+        offset: float = 0.0,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Create a reference plane using pool."""
+        return await self._execute_with_pool(
+            "create_reference_plane",
+            lambda adapter: adapter.create_reference_plane(
+                reference, offset, angle, flip
+            ),
+        )
+
+    async def mirror_feature(
+        self,
+        features: list[str],
+        mirror_plane: str,
+        merge: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mirror features using pool."""
+        return await self._execute_with_pool(
+            "mirror_feature",
+            lambda adapter: adapter.mirror_feature(features, mirror_plane, merge),
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:
@@ -695,6 +743,14 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
         """
         return await self._execute_with_pool(
             "add_line", lambda adapter: adapter.add_line(x1, y1, x2, y2)
+        )
+
+    async def add_polyline(
+        self, points: list[dict[str, float]], closed: bool = False
+    ) -> AdapterResult[dict[str, Any]]:
+        """Add a connected polyline using pool."""
+        return await self._execute_with_pool(
+            "add_polyline", lambda adapter: adapter.add_polyline(points, closed)
         )
 
     async def add_centerline(
