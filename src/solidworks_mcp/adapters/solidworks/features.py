@@ -1,4 +1,4 @@
-"""Feature-domain mixin for PyWin32 SolidWorks operations."""
+﻿"""Feature-domain mixin for PyWin32 SolidWorks operations."""
 
 from __future__ import annotations
 
@@ -456,7 +456,7 @@ def _select_named_feature(
     Sweep and loft rely on selection marks to tell SolidWorks which selection
     is the profile (1), guide curve (2), or sweep path (4).  We resolve the
     feature with ``IModelDoc2::FeatureByName`` and select it with
-    ``IFeature::Select2(append, mark)`` — the same proven path the rest of the
+    ``IFeature::Select2(append, mark)`` â€” the same proven path the rest of the
     adapter uses for plane/sketch selection.  ``IModelDocExtension::SelectByID2``
     is avoided deliberately: late-bound ``SelectByID2`` raises
     ``Type mismatch`` on some SolidWorks builds, whereas ``FeatureByName`` +
@@ -467,7 +467,7 @@ def _select_named_feature(
         adapter: A connected adapter with a valid ``currentModel``.
         name: Feature name (e.g. ``"Sketch1"`` or ``"Helix/Spiral1"``).  Any
             ``@document`` qualifier is stripped before lookup.
-        mark: Selection mark — 1=profile, 2=guide curve, 4=sweep path.
+        mark: Selection mark â€” 1=profile, 2=guide curve, 4=sweep path.
         append: ``True`` to add to the current selection set, ``False`` to
             replace it.
 
@@ -509,7 +509,7 @@ def _read_member(obj: Any, name: str) -> Any:
 
     Late-bound pywin32 dispatches are inconsistent: an unflagged zero-arg
     accessor may come back as a bound method (needing a call) *or* as the
-    already-resolved value — and when that value is itself a COM object it is
+    already-resolved value â€” and when that value is itself a COM object it is
     also callable, so a naive "call if callable" check wrongly invokes its
     default dispatch (``Member not found``).  This helper calls the member and
     falls back to the raw member if the call raises, so it yields the value in
@@ -535,7 +535,7 @@ def _read_member(obj: Any, name: str) -> Any:
 def _profile_feature_names(adapter: Any) -> list[str]:
     """Return sketch (``ProfileFeature``) names in feature-tree order.
 
-    Walks ``FirstFeature`` → ``GetNextFeature`` reading ``GetTypeName2`` and
+    Walks ``FirstFeature`` â†’ ``GetNextFeature`` reading ``GetTypeName2`` and
     collecting features whose type is ``"ProfileFeature"`` (a 2D/3D sketch).
     Mirrors the tree walk used by :func:`_create_cut_extrude_impl`, but flags
     each feature for ``IFeature`` and reads members through
@@ -735,7 +735,7 @@ def _create_loft_impl(
     """Create a lofted boss/protrusion between two or more profile sketches.
 
     Uses ``IFeatureManager::InsertProtrusionBlend2``.  Each profile named in
-    ``params.profiles`` is selected under mark 1 (in order — the selection
+    ``params.profiles`` is selected under mark 1 (in order â€” the selection
     order determines the loft direction), and any ``params.guide_curves`` are
     selected under mark 2.  Because a solid is produced, every profile must be
     a closed contour.
@@ -748,7 +748,7 @@ def _create_loft_impl(
               two are required.
             - ``guide_curves`` (list[str] | None): Optional guide curve names.
             - ``start_tangent`` / ``end_tangent`` (str | None): ``"normal"``
-              tangency at the start/end profile, anything else / ``None`` →
+              tangency at the start/end profile, anything else / ``None`` â†’
               no tangency.
             - ``merge_result`` (bool): Merge with existing bodies.
 
@@ -858,6 +858,46 @@ def _create_loft_impl(
     )
 
 
+def _model_volume(adapter: Any) -> float:
+    """Return the active model's total volume in mÂ³, or ``0.0`` if unavailable.
+
+    Used to prove that a feature actually changed the solid.  SolidWorks COM
+    calls frequently report success (or return a Feature object) while
+    producing no geometry, so volume is the ground truth.
+
+    ``Extension.CreateMassProperty()`` returns ``None`` on some builds, so this
+    falls back to ``IModelDoc2::GetMassProperties``, which is exposed as a
+    tuple property on some builds and a method on others; volume is index 3.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        float: Volume in cubic metres, or ``0.0`` when it cannot be read.
+    """
+    adapter._attempt(lambda: adapter.currentModel.ForceRebuild3(False), default=None)
+
+    mass_props = adapter._attempt(
+        lambda: adapter.currentModel.Extension.CreateMassProperty(), default=None
+    )
+    if mass_props:
+        volume = adapter._attempt(lambda: mass_props.Volume, default=None)
+        try:
+            if volume is not None:
+                return float(volume)
+        except (TypeError, ValueError):
+            pass
+
+    gmp = getattr(adapter.currentModel, "GetMassProperties", None)
+    raw = adapter._attempt(gmp, default=None) if callable(gmp) else gmp
+    try:
+        if isinstance(raw, (list, tuple)) and len(raw) > 3:
+            return float(raw[3])
+    except (TypeError, ValueError):
+        pass
+    return 0.0
+
+
 def _create_cut_extrude_impl(
     adapter: Any, params: ExtrusionParameters
 ) -> AdapterResult[SolidWorksFeature]:
@@ -870,9 +910,9 @@ def _create_cut_extrude_impl(
 
     Three COM API variants are attempted in order of preference:
 
-    1. ``FeatureCut4`` ΓÇö most modern (SolidWorks 2015+).
-    2. ``FeatureCut3`` modern signature ΓÇö SolidWorks 2010ΓÇô2014.
-    3. ``FeatureCut3`` legacy argument order ΓÇö older installs.
+    1. ``FeatureCut4`` Î“Ã‡Ã¶ most modern (SolidWorks 2015+).
+    2. ``FeatureCut3`` modern signature Î“Ã‡Ã¶ SolidWorks 2010Î“Ã‡Ã´2014.
+    3. ``FeatureCut3`` legacy argument order Î“Ã‡Ã¶ older installs.
 
     All depth values are in millimetres and converted to metres internally.
 
@@ -939,34 +979,36 @@ def _create_cut_extrude_impl(
             t1 = adapter.constants["swEndCondThroughAll"]
 
         t0 = adapter.constants.get("swStartSketchPlane", 0)
+
+        # Capture the starting volume BEFORE selecting the sketch: reading mass
+        # properties forces a rebuild, and a rebuild clears the selection set.
+        # Measuring afterwards would silently deselect the profile and make
+        # every first-attempt cut fail.
+        volume_before = _model_volume(adapter)
+
         adapter._attempt(
             lambda: adapter.currentModel.ClearSelection2(True), default=None
         )
         sketch_selected = False
 
-        try:
-            feat_iter = adapter.currentModel.FirstFeature
-            last_profile_feature = None
-            while feat_iter:
-                try:
-                    type_name = feat_iter.GetTypeName2
-                    if type_name == "ProfileFeature":
-                        last_profile_feature = feat_iter
-                except Exception:
-                    pass
-                try:
-                    feat_iter = feat_iter.GetNextFeature
-                except Exception:
-                    break
-            if last_profile_feature:
-                sketch_selected = bool(
-                    adapter._attempt(
-                        lambda pf=last_profile_feature: pf.Select2(False, 0),
-                        default=False,
-                    )
-                )
-        except Exception:
-            pass
+        # Resolve the profile sketch to cut with.  Use the flagged tree walk
+        # (``_profile_feature_names``) rather than reading ``GetTypeName2`` /
+        # ``GetNextFeature`` as raw properties: without method flagging those
+        # accessors return bound methods, so the raw walk silently finds zero
+        # sketches, nothing gets selected, and FeatureCut* returns None.
+        # Prefer the most recently created sketch, then the tracked name.
+        candidates: list[str] = []
+        sketch_names = _profile_feature_names(adapter)
+        if sketch_names:
+            candidates.append(sketch_names[-1])
+        if adapter._last_sketch_name:
+            candidates.append(adapter._last_sketch_name)
+
+        for candidate in candidates:
+            if _select_feature_by_name(adapter, candidate):
+                sketch_selected = True
+                adapter._last_sketch_name = candidate
+                break
 
         if not sketch_selected:
             for candidate in (
@@ -1001,14 +1043,21 @@ def _create_cut_extrude_impl(
                 sw_major = 0
 
         # 1. FeatureCut4 (SW 2015+)
-        # Note: SW 2025 (major=33) verified with 27 params by VBA macro.
+        # Note: SW 2025 (major=33) verified with 27 params against the live
+        # type library (the 27th, OptimizeGeometry, was previously omitted and
+        # produced DISP_E_PARAMNOTOPTIONAL).
         # Other versions use 28 params (original code).
+        #
+        # ``cut_direction`` is toggled by the retry loop below: SolidWorks
+        # silently returns None when a cut is aimed away from the solid, so
+        # both directions are attempted before giving up.
+        cut_direction = normalized.reverse_direction
         if sw_major == 33:
             feature, cut4_error = adapter._attempt_with_error(
                 lambda: feature_manager.FeatureCut4(
                     is_through,  # Sd
                     False,  # Flip
-                    normalized.reverse_direction,  # Dir
+                    cut_direction,  # Dir
                     t1,  # T1
                     adapter.constants["swEndCondBlind"],  # T2
                     depth_m,  # D1
@@ -1032,6 +1081,7 @@ def _create_cut_extrude_impl(
                     t0,  # T0
                     0.0,  # StartOffset
                     False,  # FlipStartOffset
+                    True,  # OptimizeGeometry
                 )
             )
         else:
@@ -1138,6 +1188,93 @@ def _create_cut_extrude_impl(
             if cut3_legacy_error is not None:
                 fallback_errors.append(f"FeatureCut3 legacy: {cut3_legacy_error}")
 
+        # Retry with the opposite direction when the first pass produced
+        # nothing.  A cut aimed away from the solid is rejected silently
+        # (FeatureCut4 returns None) or leaves the volume untouched, so rather
+        # than making the caller guess which way points "into" the material we
+        # simply try the other side.
+        flipped = not cut_direction
+        if not feature or _model_volume(adapter) >= volume_before * 0.999:
+            if feature:
+                # Remove the no-op cut before retrying so the tree stays clean.
+                adapter._attempt(
+                    lambda f=feature: f.Select2(False, 0), default=False
+                )
+                adapter._attempt(
+                    lambda: adapter.currentModel.EditDelete(), default=None
+                )
+                feature = None
+
+            for candidate in candidates:
+                if _select_feature_by_name(adapter, candidate):
+                    break
+
+            feature, retry_error = adapter._attempt_with_error(
+                lambda: feature_manager.FeatureCut4(
+                    is_through,
+                    False,
+                    flipped,
+                    t1,
+                    adapter.constants["swEndCondBlind"],
+                    depth_m,
+                    0.0,
+                    False,
+                    False,
+                    False,
+                    False,
+                    normalized.draft_angle * 3.14159 / 180.0,
+                    0.0,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    normalized.feature_scope,
+                    normalized.auto_select,
+                    False,
+                    False,
+                    False,
+                    t0,
+                    0.0,
+                    False,
+                    True,
+                )
+                if sw_major == 33
+                else feature_manager.FeatureCut4(
+                    is_through,
+                    False,
+                    flipped,
+                    t1,
+                    adapter.constants["swEndCondBlind"],
+                    depth_m,
+                    0.0,
+                    False,
+                    False,
+                    False,
+                    False,
+                    normalized.draft_angle * 3.14159 / 180.0,
+                    0.0,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    normalized.feature_scope,
+                    normalized.auto_select,
+                    False,
+                    False,
+                    False,
+                    t0,
+                    0.0,
+                    False,
+                    False,
+                )
+            )
+            if retry_error is not None:
+                fallback_errors.append(f"FeatureCut4 (flipped): {retry_error}")
+            else:
+                cut_direction = flipped
+
         if not feature:
             if fallback_errors:
                 raise Exception(
@@ -1146,6 +1283,17 @@ def _create_cut_extrude_impl(
                 )
             raise Exception("Failed to create cut extrude feature")
 
+        # Prove material was actually removed rather than trusting the COM
+        # return value, which can be a valid Feature for a cut that did nothing.
+        volume_after = _model_volume(adapter)
+        if volume_before and volume_after >= volume_before * 0.999:
+            raise Exception(
+                "Cut created no change in the model "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                "The sketch profile probably does not overlap the solid in "
+                "either direction. Check the sketch position and end condition."
+            )
+
         return SolidWorksFeature(
             name=feature.Name,
             type="Cut-Extrude",
@@ -1153,7 +1301,8 @@ def _create_cut_extrude_impl(
             parameters={
                 "depth": normalized.depth,
                 "draft_angle": normalized.draft_angle,
-                "reverse_direction": normalized.reverse_direction,
+                "reverse_direction": cut_direction,
+                "volume_removed": max(0.0, volume_before - volume_after),
             },
             properties={"created": datetime.now().isoformat()},
         )
@@ -1376,7 +1525,7 @@ def _select_feature_by_name(adapter: Any, name: str) -> bool:
     """Select a feature or sketch by name for an edit operation.
 
     Resolves the entity with ``IModelDoc2::FeatureByName`` and selects it with
-    ``IFeature::Select2(False, 0)`` — the same reliable path used elsewhere in
+    ``IFeature::Select2(False, 0)`` â€” the same reliable path used elsewhere in
     this adapter (avoids ``SelectByID2`` entity-type strings, which raise
     ``Type mismatch`` on some SW builds and differ for sketches vs solid
     features). Any ``name@document`` qualifier is stripped before lookup.
@@ -1446,7 +1595,7 @@ def _suppress_feature_impl(
 
     Selects the feature, then calls ``IModelDoc2::EditSuppress2`` (suppress) or
     ``EditUnsuppress2`` (unsuppress) on the selection. Suppressing rolls the
-    feature (and its children) out of the model without deleting it — the safe,
+    feature (and its children) out of the model without deleting it â€” the safe,
     reversible way to "turn off" a bad feature.
 
     Args:
@@ -1544,9 +1693,9 @@ def _create_reference_plane_impl(
 
     Constraint selection:
 
-    * ``offset`` non-zero → ``swRefPlaneReferenceConstraint_Distance`` (8)
-    * ``angle`` non-zero  → ``swRefPlaneReferenceConstraint_Angle`` (16)
-    * ``flip`` → OR-ed with ``swRefPlaneReferenceConstraint_OptionFlip`` (256)
+    * ``offset`` non-zero â†’ ``swRefPlaneReferenceConstraint_Distance`` (8)
+    * ``angle`` non-zero  â†’ ``swRefPlaneReferenceConstraint_Angle`` (16)
+    * ``flip`` â†’ OR-ed with ``swRefPlaneReferenceConstraint_OptionFlip`` (256)
 
     This removes the long-standing gap where sketches could only be placed on
     the six built-in planes, forcing offset planes to be created by hand in the
@@ -1670,8 +1819,8 @@ def _mirror_feature_impl(
     Wraps ``IFeatureManager::InsertMirrorFeature``.  Per the SolidWorks API
     contract the entities must be preselected under specific marks:
 
-    * **mark 1** — each feature to be mirrored
-    * **mark 2** — the mirror plane (or planar face)
+    * **mark 1** â€” each feature to be mirrored
+    * **mark 2** â€” the mirror plane (or planar face)
 
     Features are resolved with ``FeatureByName`` + ``Select2`` (robust across
     builds); the plane falls back to ``SelectByID2`` with ``"PLANE"``/``"FACE"``
@@ -1681,7 +1830,7 @@ def _mirror_feature_impl(
     (e.g. the second half of a shell) had to be done by hand in the UI.
 
     **Scope (verified on SW 2025):** feature mirroring resolves when the
-    mirrored feature's sketch sits on — or passes through — the mirror plane
+    mirrored feature's sketch sits on â€” or passes through â€” the mirror plane
     (volume doubles, confirmed).  A feature built on a *different* plane offset
     from the mirror plane cannot be resolved as a feature mirror by SolidWorks;
     the COM call still returns a Feature object but produces no geometry, so
@@ -1831,3 +1980,4 @@ def _mirror_feature_impl(
         AdapterResult[dict[str, Any]],
         adapter._handle_com_operation("mirror_feature", _mirror_operation),
     )
+
