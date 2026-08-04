@@ -1604,6 +1604,42 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def create_shell(
+        self,
+        thickness: float,
+        remove_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock hollowing the solid.
+
+        Args:
+            thickness (float): Wall thickness in mm.
+            remove_faces (list[int] | None): Face indices to open.
+            outward (bool): Thicken outward.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Shell payload.
+        """
+        if thickness <= 0:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="create_shell requires a positive wall thickness",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "thickness": thickness,
+                "removed_faces": list(remove_faces or []),
+                "face_count": 6,
+                "outward": outward,
+                "volume": random.uniform(1000, 100000),
+            },
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
     async def check_sketch_fully_defined(
         self, sketch_name: str | None = None
     ) -> AdapterResult[dict[str, Any]]:

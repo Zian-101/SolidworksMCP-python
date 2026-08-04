@@ -83,6 +83,14 @@ class SolidWorksFeaturesMixin:
     ) -> AdapterResult[dict[str, Any]]:
         return _mirror_feature_impl(self, features, mirror_plane, merge)
 
+    async def create_shell(
+        self,
+        thickness: float,
+        remove_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _create_shell_impl(self, thickness, remove_faces, outward)
+
 
 def _create_extrusion_impl(
     adapter: Any, params: ExtrusionParameters
@@ -933,6 +941,125 @@ def _select_all_edges(adapter: Any) -> int:
             if adapter._attempt(lambda e=edge: e.Select2(True, 0), default=False):
                 count += 1
     return count
+
+
+def _body_faces(adapter: Any) -> list[Any]:
+    """Return every face of the first solid body in the active part.
+
+    Face order is stable for a given model, so callers can address faces by
+    index — there is no API here that enumerates SolidWorks face *names*.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        list[Any]: Face COM objects, empty when no solid body is present.
+    """
+    model = adapter.currentModel
+    bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        bodies = adapter._attempt(
+            lambda: model.Extension.GetBodies2(0, True), default=None
+        )
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        return []
+    faces = adapter._attempt(lambda: bodies[0].GetFaces(), default=None)
+    return list(faces) if isinstance(faces, (list, tuple)) else []
+
+
+def _create_shell_impl(
+    adapter: Any,
+    thickness: float,
+    remove_faces: list[int] | None,
+    outward: bool,
+) -> AdapterResult[dict[str, Any]]:
+    """Hollow out the solid, optionally opening one or more faces.
+
+    Wraps ``IModelDoc2::InsertFeatureShell(Thickness, Outward)``.  Faces to be
+    removed must be selected beforehand; because nothing in this adapter can
+    enumerate SolidWorks face *names*, faces are addressed by **index** into
+    :func:`_body_faces` (stable for a given model).  With no indices the body
+    is hollowed with no opening.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        thickness: Wall thickness in **millimetres**.
+        remove_faces: Indices of faces to open, or ``None``/empty for a fully
+            closed hollow body.
+        outward: Thicken outward instead of inward.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Wall thickness, removed faces and the
+        resulting volume.  ``ERROR`` when the model has no solid, an index is
+        out of range, or the volume does not change.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # 2 mm walls, open the face at index 5
+        await adapter.create_shell(2.0, remove_faces=[5])
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    if thickness <= 0:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_shell requires a positive wall thickness",
+        )
+
+    def _shell_operation() -> dict[str, Any]:
+        """Inner COM closure: select faces to open, then shell the body."""
+        volume_before = _model_volume(adapter)
+
+        faces = _body_faces(adapter)
+        if not faces:
+            raise Exception("No solid body found to shell")
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        selected: list[int] = []
+        for index in remove_faces or []:
+            if index < 0 or index >= len(faces):
+                raise Exception(
+                    f"Face index {index} out of range - the body has "
+                    f"{len(faces)} faces (0-{len(faces) - 1})"
+                )
+            if adapter._attempt(
+                lambda f=faces[index]: f.Select2(True, 0), default=False
+            ):
+                selected.append(index)
+
+        if (remove_faces or []) and not selected:
+            raise Exception(f"Failed to select any face from {remove_faces}")
+
+        adapter.currentModel.InsertFeatureShell(thickness / 1000.0, bool(outward))
+
+        # InsertFeatureShell returns void, so volume is the only proof it ran.
+        volume_after = _model_volume(adapter)
+        if volume_before and volume_after >= volume_before * 0.999:
+            raise Exception(
+                "Shell produced no change in the model "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                f"A {thickness}mm wall may be too thick for this body."
+            )
+
+        return {
+            "thickness": thickness,
+            "removed_faces": selected,
+            "face_count": len(faces),
+            "outward": bool(outward),
+            "volume": volume_after,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("create_shell", _shell_operation),
+    )
 
 
 def _model_volume(adapter: Any) -> float:

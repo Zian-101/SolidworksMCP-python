@@ -1058,6 +1058,27 @@ class SolidWorksAdapter(ABC):
             error="mirror_feature is not implemented by this adapter",
         )
 
+    async def create_shell(
+        self,
+        thickness: float,
+        remove_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> "AdapterResult[Any]":
+        """Hollow out the solid, optionally opening one or more faces.
+
+        Args:
+            thickness (float): Wall thickness in millimetres.
+            remove_faces (list[int] | None): Indices of faces to open.
+            outward (bool): Thicken outward instead of inward.
+
+        Returns:
+            AdapterResult: Shell details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_shell is not implemented by this adapter",
+        )
+
     @abstractmethod
     async def exit_sketch(self) -> AdapterResult[None]:
         """Exit sketch editing mode.

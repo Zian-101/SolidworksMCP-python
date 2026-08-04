@@ -667,6 +667,18 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             lambda adapter: adapter.mirror_feature(features, mirror_plane, merge),
         )
 
+    async def create_shell(
+        self,
+        thickness: float,
+        remove_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Shell the solid using pool."""
+        return await self._execute_with_pool(
+            "create_shell",
+            lambda adapter: adapter.create_shell(thickness, remove_faces, outward),
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:

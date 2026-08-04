@@ -734,6 +734,23 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             },
         )
 
+    async def create_shell(
+        self,
+        thickness: float,
+        remove_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Shell the solid through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "create_shell",
+            lambda: self.adapter.create_shell(thickness, remove_faces, outward),
+            input_dict={
+                "thickness": thickness,
+                "remove_faces": remove_faces,
+                "outward": outward,
+            },
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:

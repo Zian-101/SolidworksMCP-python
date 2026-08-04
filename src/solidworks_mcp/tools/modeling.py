@@ -447,6 +447,29 @@ class MirrorFeatureInput(CompatInput):
             raise ValueError("features must contain at least one feature name")
 
 
+class CreateShellInput(CompatInput):
+    """Input schema for hollowing a solid.
+
+    Attributes:
+        thickness (float): Wall thickness in millimetres.
+        remove_faces (list[int]): Indices of faces to open.
+        outward (bool): Thicken outward instead of inward.
+    """
+
+    thickness: float = Field(description="Wall thickness in millimetres")
+    remove_faces: list[int] = Field(
+        default_factory=list,
+        description="Indices of faces to open (0-based). Omit for a closed hollow body.",
+    )
+    outward: bool = Field(
+        default=False, description="Thicken outward instead of inward"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.thickness <= 0:
+            raise ValueError("thickness must be positive")
+
+
 class UndoInput(CompatInput):
     """Input schema for undoing recent operations.
 
@@ -1276,6 +1299,62 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in create_reference_plane tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def create_shell(input_data: CreateShellInput) -> dict[str, Any]:
+        """Hollow out the solid, optionally opening one or more faces.
+
+        Creates a Shell feature (Insert > Features > Shell) — the standard way
+        to turn a solid block into a walled enclosure.
+
+        Faces are addressed by **index**, because SolidWorks face names cannot
+        be enumerated through this adapter. The returned ``face_count`` tells
+        you how many faces exist; indices are stable for a given model, so a
+        quick call with no ``remove_faces`` reveals the count, then re-run with
+        the index you want opened.
+
+        Args:
+            input_data (CreateShellInput): Thickness, faces to open, direction.
+
+        Returns:
+            dict[str, Any]: Status, wall thickness, opened faces and volume.
+
+        Example:
+            ```python
+            # 2 mm walls, open face 0 (an enclosure with one side removed)
+            await create_shell({"thickness": 2.0, "remove_faces": [0]})
+
+            # Fully closed hollow body
+            await create_shell({"thickness": 1.5})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, CreateShellInput)
+            result = await adapter.create_shell(
+                input_data.thickness, input_data.remove_faces, input_data.outward
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Shelled body to {input_data.thickness}mm walls"
+                        + (
+                            f", opened face(s) {data.get('removed_faces')}"
+                            if data.get("removed_faces")
+                            else " (closed)"
+                        )
+                    ),
+                    "shell": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to shell body: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in create_shell tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
