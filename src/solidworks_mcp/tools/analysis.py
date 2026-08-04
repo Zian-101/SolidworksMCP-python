@@ -295,14 +295,19 @@ async def register_analysis_tools(
                     "message": result.error or "Interference check failed",
                 }
 
-            # Simulated interference check - would use actual analysis
+            # No adapter support.  Deliberately an error, not a cheerful
+            # "interference_found: False" — a fabricated clean bill of health
+            # on an assembly check is worse than no answer at all.
             return {
-                "status": "success",
-                "message": "Interference check completed",
-                "interference_found": False,  # Would be actual result
-                "components_checked": input_data.components,
+                "status": "error",
+                "message": (
+                    "Interference detection is unavailable: the active adapter "
+                    "does not implement check_interference. Connect the "
+                    "SolidWorks adapter to an open assembly, or run Tools > "
+                    "Interference Detection in SolidWorks."
+                ),
+                "components_requested": input_data.components,
                 "tolerance": input_data.tolerance,
-                "interferences": [],  # Would contain actual interference data
             }
 
         except Exception as e:
@@ -313,29 +318,122 @@ async def register_analysis_tools(
             }
 
     @mcp.tool()
-    async def analyze_geometry(input_data: GeometryAnalysisInput) -> dict[str, Any]:
-        """Handle analyze geometry.
+    async def get_bounding_box() -> dict[str, Any]:
+        """Measure the overall bounding box of the active model's solid bodies.
 
-        This tool provides various geometry analysis capabilities like curvature analysis, draft
-        analysis, thickness analysis, etc.
+        Reads the real extents from SolidWorks via ``IBody2::GetBodyBox``, unioned across
+        every solid body, so a multibody part reports one overall box. All values are in
+        millimetres.
+
+        Returns:
+            dict[str, Any]: A dictionary containing the resulting values.
+
+        Example:
+                            ```python
+                            result = await get_bounding_box()
+                            if result["status"] == "success":
+                                dims = result["bounding_box"]["dimensions"]
+                                print(f"{dims['x']} x {dims['y']} x {dims['z']} mm")
+                            ```
+        """
+        try:
+            result = await adapter.get_bounding_box()
+            if result.is_success:
+                return {
+                    "status": "success",
+                    "message": "Bounding box measured",
+                    "bounding_box": result.data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": result.error or "Bounding box measurement failed",
+            }
+        except Exception as e:
+            logger.error(f"Error in get_bounding_box tool: {e}")
+            return {
+                "status": "error",
+                "message": f"Unexpected error: {str(e)}",
+            }
+
+    # Analysis types this tool can actually answer, mapped to the adapter call
+    # that produces the answer.  Anything outside this set is rejected rather
+    # than answered with a plausible-looking guess.
+    _SUPPORTED_ANALYSES = ("bounding_box", "bbox", "extents", "volume", "mass")
+
+    @mcp.tool()
+    async def analyze_geometry(input_data: GeometryAnalysisInput) -> dict[str, Any]:
+        """Analyze the geometry of the active model.
+
+        Supported ``analysis_type`` values are ``bounding_box`` (aliases ``bbox``,
+        ``extents``) and ``volume`` (alias ``mass``); both are measured from the live
+        model. Any other analysis type is rejected explicitly — this tool will not
+        invent findings for analyses it cannot perform. For curvature, draft, thickness
+        and similar studies, use the SolidWorks Evaluate tab or generate a VBA macro.
 
         Args:
             input_data (GeometryAnalysisInput): The input data value.
 
         Returns:
             dict[str, Any]: A dictionary containing the resulting values.
+
+        Example:
+                            ```python
+                            result = await analyze_geometry({"analysis_type": "bounding_box"})
+                            print(result["results"]["dimensions"])
+                            ```
         """
         try:
-            # Simulated geometry analysis
+            analysis_type = str(input_data.analysis_type).strip().lower()
+
+            if analysis_type in ("bounding_box", "bbox", "extents"):
+                result = await adapter.get_bounding_box()
+                if not result.is_success:
+                    return {
+                        "status": "error",
+                        "message": result.error or "Bounding box measurement failed",
+                        "analysis_type": analysis_type,
+                    }
+                return {
+                    "status": "success",
+                    "message": "Bounding box analysis completed",
+                    "analysis_type": analysis_type,
+                    "results": result.data,
+                }
+
+            if analysis_type in ("volume", "mass"):
+                result = await adapter.get_mass_properties()
+                if not result.is_success:
+                    return {
+                        "status": "error",
+                        "message": result.error or "Mass property read failed",
+                        "analysis_type": analysis_type,
+                    }
+                props = result.data
+                return {
+                    "status": "success",
+                    "message": "Volume analysis completed",
+                    "analysis_type": analysis_type,
+                    "results": {
+                        "volume": getattr(props, "volume", None),
+                        "volume_units": "mm^3",
+                        "surface_area": getattr(props, "surface_area", None),
+                        "surface_area_units": "mm^2",
+                        "mass": getattr(props, "mass", None),
+                        "mass_units": "kg",
+                    },
+                }
+
             return {
-                "status": "success",
-                "message": f"Geometry analysis ({input_data.analysis_type}) completed",
+                "status": "error",
+                "message": (
+                    f"Analysis type '{input_data.analysis_type}' is not supported. "
+                    f"Supported types: {', '.join(_SUPPORTED_ANALYSES)}. "
+                    "Other studies (curvature, draft, thickness) are not implemented "
+                    "and this tool will not return fabricated findings for them."
+                ),
                 "analysis_type": input_data.analysis_type,
-                "results": {
-                    "summary": f"Analysis of type {input_data.analysis_type} completed",
-                    "parameters": input_data.parameters,
-                    "findings": ["No issues found"],  # Would be actual results
-                },
+                "supported_types": list(_SUPPORTED_ANALYSES),
             }
 
         except Exception as e:
@@ -349,26 +447,40 @@ async def register_analysis_tools(
     async def get_material_properties() -> dict[str, Any]:
         """Get material properties of the current model.
 
-        This tool retrieves the material properties assigned to the model including density,
-        elastic modulus, yield strength, etc.
+        Reads the material actually assigned in SolidWorks. Density is derived from the
+        model's own mass and volume. Mechanical and thermal properties are not exposed by
+        the SolidWorks COM material API, so they are omitted rather than estimated — check
+        the material in the SolidWorks material editor if you need them.
 
         Returns:
             dict[str, Any]: A dictionary containing the resulting values.
+
+        Example:
+                            ```python
+                            result = await get_material_properties()
+                            if result["status"] == "success":
+                                print(result["material"]["name"])
+                            ```
         """
-        # Simulated material properties
-        return {
-            "status": "success",
-            "material": {
-                "name": "Steel, Plain Carbon",
-                "density": {"value": 7850, "units": "kg/m³"},
-                "elastic_modulus": {"value": 200000, "units": "MPa"},
-                "yield_strength": {"value": 250, "units": "MPa"},
-                "ultimate_tensile_strength": {"value": 400, "units": "MPa"},
-                "poissons_ratio": 0.29,
-                "thermal_conductivity": {"value": 50, "units": "W/(m·K)"},
-                "specific_heat": {"value": 460, "units": "J/(kg·K)"},
-            },
-        }
+        try:
+            result = await adapter.get_material_properties()
+            if result.is_success:
+                return {
+                    "status": "success",
+                    "message": "Material properties read",
+                    "material": result.data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": result.error or "Material property read failed",
+            }
+        except Exception as e:
+            logger.error(f"Error in get_material_properties tool: {e}")
+            return {
+                "status": "error",
+                "message": f"Unexpected error: {str(e)}",
+            }
 
     # Future analysis tools:
     # - perform_fea_analysis (if FEA capabilities are available)

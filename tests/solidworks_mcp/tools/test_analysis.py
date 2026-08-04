@@ -261,12 +261,16 @@ class TestAnalysisTools:
         assert geometry_tool is not None
         assert material_tool is not None
 
-        # Fallback branch when adapter has no check_interference method.
+        # Fallback branch when adapter has no check_interference method.  This
+        # must report an error rather than a fabricated "no interference"
+        # result — a false clean bill of health on an assembly is worse than
+        # no answer.
         if hasattr(mock_adapter, "check_interference"):
             delattr(mock_adapter, "check_interference")
         fallback = await check_tool(input_data=InterferenceCheckInput())
-        assert fallback["status"] == "success"
-        assert fallback["interference_found"] is False
+        assert fallback["status"] == "error"
+        assert "does not implement check_interference" in fallback["message"]
+        assert "interference_found" not in fallback
 
         # Exception branch for adapter check_interference.
         mock_adapter.check_interference = AsyncMock(side_effect=RuntimeError("boom"))

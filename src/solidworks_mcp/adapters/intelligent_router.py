@@ -73,9 +73,13 @@ class IntelligentRouter:
             # volumes mid-build.
             # "get_mass_properties",
             # "calculate_mass_properties",
-            "get_material_properties",
-            "analyze_geometry",
-            "check_interference",
+            # These three now read live geometry too (bounding box, mass, and
+            # assembly interference), so they inherit the same staleness
+            # problem and stay uncached until the router can invalidate.
+            # "get_material_properties",
+            # "analyze_geometry",
+            # "check_interference",
+            # "get_bounding_box",
             # Drawing analysis operations
             "analyze_drawing_comprehensive",
             "analyze_drawing_dimensions",

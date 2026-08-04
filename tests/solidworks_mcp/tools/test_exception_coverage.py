@@ -560,7 +560,7 @@ class TestAnalysisCoverage:
 
     @pytest.mark.asyncio
     async def test_get_material_properties_returns_success(self):
-        """Lines 358-371 — get_material_properties returns static material data."""
+        """get_material_properties delegates to the adapter and returns its payload."""
         from solidworks_mcp.tools.analysis import register_analysis_tools
 
         mcp = _make_mcp()

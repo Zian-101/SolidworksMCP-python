@@ -103,6 +103,9 @@ class SolidWorksFeaturesMixin:
             self, features, direction, count, spacing, direction_edge
         )
 
+    async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
+        return _get_bounding_box_impl(self)
+
 
 def _create_extrusion_impl(
     adapter: Any, params: ExtrusionParameters
@@ -1322,6 +1325,71 @@ def _pattern_linear_impl(
     return cast(
         AdapterResult[dict[str, Any]],
         adapter._handle_com_operation("pattern_linear", _pattern_operation),
+    )
+
+
+def _get_bounding_box_impl(adapter: Any) -> AdapterResult[dict[str, Any]]:
+    """Measure the axis-aligned bounding box of the model's solid bodies.
+
+    Uses ``IBody2::GetBodyBox``, which returns ``[x1, y1, z1, x2, y2, z2]`` in
+    metres; results are converted to millimetres and unioned across every solid
+    body so a multibody part reports one overall box.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Min/max corners, per-axis dimensions and
+        the number of bodies measured.  ``ERROR`` when the model holds no solid
+        body or the box cannot be read.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    def _bbox_operation() -> dict[str, Any]:
+        model = adapter.currentModel
+        bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
+        if not isinstance(bodies, (list, tuple)) or not bodies:
+            bodies = adapter._attempt(
+                lambda: model.Extension.GetBodies2(0, True), default=None
+            )
+        if not isinstance(bodies, (list, tuple)) or not bodies:
+            raise Exception("No solid bodies found to measure")
+
+        low = [float("inf")] * 3
+        high = [float("-inf")] * 3
+        measured = 0
+        for body in bodies:
+            box = adapter._attempt(lambda b=body: b.GetBodyBox(), default=None)
+            if not isinstance(box, (list, tuple)) or len(box) < 6:
+                continue
+            values = [float(v) * 1000.0 for v in box[:6]]
+            for axis in range(3):
+                low[axis] = min(low[axis], values[axis], values[axis + 3])
+                high[axis] = max(high[axis], values[axis], values[axis + 3])
+            measured += 1
+
+        if not measured:
+            raise Exception("GetBodyBox returned no usable extents")
+
+        return {
+            "min": {"x": low[0], "y": low[1], "z": low[2]},
+            "max": {"x": high[0], "y": high[1], "z": high[2]},
+            "dimensions": {
+                "x": high[0] - low[0],
+                "y": high[1] - low[1],
+                "z": high[2] - low[2],
+            },
+            "bodies_measured": measured,
+            "units": "mm",
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("get_bounding_box", _bbox_operation),
     )
 
 

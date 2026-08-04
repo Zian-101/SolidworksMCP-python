@@ -1197,6 +1197,32 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"include_suppressed": include_suppressed},
         )
 
+    async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
+        """Bounding box through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "get_bounding_box",
+            lambda: self.adapter.get_bounding_box(),
+            input_dict={},
+        )
+
+    async def check_interference(
+        self, params: dict[str, Any] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Interference detection through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "check_interference",
+            lambda: self.adapter.check_interference(params),
+            input_dict=_to_input_dict(params),
+        )
+
+    async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
+        """Material read through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "get_material_properties",
+            lambda: self.adapter.get_material_properties(),
+            input_dict={},
+        )
+
     async def list_configurations(self) -> AdapterResult[list[str]]:
         """List model configurations through circuit breaker.
 

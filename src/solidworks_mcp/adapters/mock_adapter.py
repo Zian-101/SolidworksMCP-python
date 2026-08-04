@@ -1686,6 +1686,71 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
+        """Mock bounding box measurement.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Bounding box payload in mm.
+        """
+        await asyncio.sleep(self._delays["sketch_operation"] / 4)
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "min": {"x": -30.0, "y": -20.0, "z": 0.0},
+                "max": {"x": 30.0, "y": 20.0, "z": 20.0},
+                "dimensions": {"x": 60.0, "y": 40.0, "z": 20.0},
+                "bodies_measured": 1,
+                "units": "mm",
+            },
+            execution_time=self._delays["sketch_operation"] / 4,
+        )
+
+    async def check_interference(
+        self, params: dict[str, Any] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock interference detection.
+
+        Args:
+            params (dict[str, Any] | None): Detection options. Defaults to None.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: A clean (no-interference) result.
+        """
+        options = params or {}
+        await asyncio.sleep(self._delays["model_operation"])
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "interference_found": False,
+                "interference_count": 0,
+                "interferences": [],
+                "coincident_treated_as_interference": bool(
+                    options.get("coincident", False)
+                ),
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
+        """Mock material read.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: A plain-carbon-steel stand-in.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "assigned": True,
+                "name": "Plain Carbon Steel",
+                "database": "solidworks materials.sldmat",
+                "configuration": "Default",
+                "density": {"value": 7850.0, "units": "kg/m^3"},
+                "notes": "Mock adapter: values are simulated.",
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
     async def check_sketch_fully_defined(
         self, sketch_name: str | None = None
     ) -> AdapterResult[dict[str, Any]]:

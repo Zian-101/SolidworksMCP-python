@@ -1104,6 +1104,44 @@ class SolidWorksAdapter(ABC):
             error="pattern_linear is not implemented by this adapter",
         )
 
+    async def get_bounding_box(self) -> "AdapterResult[Any]":
+        """Measure the axis-aligned bounding box of the model's solid bodies.
+
+        Returns:
+            AdapterResult: Min/max corners and per-axis dimensions in mm.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="get_bounding_box is not implemented by this adapter",
+        )
+
+    async def check_interference(
+        self, params: dict[str, Any] | None = None
+    ) -> "AdapterResult[Any]":
+        """Detect interfering components in the active assembly.
+
+        Args:
+            params (dict[str, Any] | None): Detection options.
+
+        Returns:
+            AdapterResult: Interference count and component pairs, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="check_interference is not implemented by this adapter",
+        )
+
+    async def get_material_properties(self) -> "AdapterResult[Any]":
+        """Read the material assigned to the active model.
+
+        Returns:
+            AdapterResult: Material name and derived density, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="get_material_properties is not implemented by this adapter",
+        )
+
     @abstractmethod
     async def exit_sketch(self) -> AdapterResult[None]:
         """Exit sketch editing mode.

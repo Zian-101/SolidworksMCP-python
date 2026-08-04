@@ -411,7 +411,10 @@ _SMOKE_PAYLOADS: dict[str, dict[str, Any]] = {
     "calculate_mass_properties": {},
     "get_mass_properties": {},
     "check_interference": {},
-    "analyze_geometry": {"analysis_type": "curvature"},
+    # "curvature" is deliberately unsupported and returns an error; use a real
+    # analysis type so the smoke run exercises the measuring path.
+    "analyze_geometry": {"analysis_type": "bounding_box"},
+    "get_bounding_box": {},
     "get_material_properties": {},
     # Export
     "export_step": {"file_path": "C:\\Temp\\smoke.step", "format_type": "step"},

@@ -206,6 +206,7 @@ class SolidWorksMCPServer:
             "get_material_properties",
             "analyze_geometry",
             "check_interference",
+            "get_bounding_box",
             # Drawing analysis operations
             "analyze_drawing_comprehensive",
             "analyze_drawing_dimensions",
@@ -557,6 +558,7 @@ async def list_capabilities() -> dict[str, list[str]]:
             "perform_fea_analysis",
             "check_interference",
             "analyze_geometry",
+            "get_bounding_box",
             "get_material_properties",
         ],
         "export": [

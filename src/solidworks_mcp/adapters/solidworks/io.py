@@ -720,3 +720,188 @@ class SolidWorksIOMixin:
             AdapterResult[MassProperties],
             adapter._handle_com_operation("get_mass_properties", _get),
         )
+
+    async def check_interference(
+        self, params: dict[str, Any] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Run SolidWorks' interference detection on the active assembly.
+
+        Uses ``IAssemblyDoc::ToolsCheckInterference2``, whose gen_py signature is
+        ``(NumComponents, LpComponents, CoincidentInterference, PComp[out],
+        PFace[out]) -> long``.  The **return value is a count**, which is what
+        makes an honest answer possible here: ``0`` means SolidWorks really
+        found nothing, while a COM failure raises and is reported as an error
+        rather than being flattened into a false "no interference".
+
+        Passing ``NumComponents=0`` checks the whole assembly.
+
+        Args:
+            params (dict[str, Any] | None): Optional settings.  ``coincident``
+                (bool, default ``False``) treats coincident faces as
+                interference.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: ``interference_found``, the
+            ``interference_count``, and the component-name pairs SolidWorks
+            reported.  ``ERROR`` when there is no active model or the active
+            document is not an assembly.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+        """
+        adapter = self._adapter(self)
+        options = params or {}
+
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+
+        doc_type = adapter._attempt(
+            lambda: adapter.currentModel.GetType(), default=None
+        )
+        if doc_type != 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    "Interference detection requires an assembly document "
+                    f"(active document type is {doc_type!r}, expected 2)"
+                ),
+            )
+
+        coincident = bool(options.get("coincident", False))
+
+        def _check() -> dict[str, Any]:
+            import pythoncom
+
+            raw = adapter.currentModel.ToolsCheckInterference2(
+                0, None, coincident, pythoncom.Missing, pythoncom.Missing
+            )
+
+            # Out-parameters come back appended to the return value under
+            # late binding, so the shape is either a bare count or
+            # (count, comps, faces).
+            comps: Any = None
+            if isinstance(raw, (list, tuple)):
+                count = int(raw[0]) if raw else 0
+                if len(raw) > 1:
+                    comps = raw[1]
+            else:
+                count = int(raw or 0)
+
+            # ToolsCheckInterference2 returns components two-per-interference.
+            names: list[str] = []
+            if isinstance(comps, (list, tuple)):
+                for comp in comps:
+                    name = adapter._attempt(lambda c=comp: c.Name2, default=None)
+                    if not name:
+                        name = adapter._attempt(
+                            lambda c=comp: c.GetSelectByIDString(), default=None
+                        )
+                    names.append(str(name) if name else "<unnamed>")
+
+            pairs = [
+                {"component_1": names[i], "component_2": names[i + 1]}
+                for i in range(0, len(names) - 1, 2)
+            ]
+
+            return {
+                "interference_found": count > 0,
+                "interference_count": count,
+                "interferences": pairs,
+                "coincident_treated_as_interference": coincident,
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("check_interference", _check),
+        )
+
+    async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
+        """Read the material actually assigned to the active part.
+
+        Name comes from ``IPartDoc::GetMaterialPropertyName2(ConfigName,
+        Database[out])``.  Density is derived from the model's own mass and
+        volume rather than looked up, so it reflects what SolidWorks is really
+        using.
+
+        Mechanical properties (elastic modulus, yield strength, Poisson's
+        ratio, thermal values) are **not** exposed through this COM path —
+        ``GetMaterialPropertyValues2`` returns *visual* properties, not
+        physical ones.  They are reported as ``None`` with an explanatory
+        ``notes`` entry instead of being filled in with plausible defaults.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Material name, database, derived
+            density, and the config it was read from.  ``ERROR`` when there is
+            no active model.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+        """
+        adapter = self._adapter(self)
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+
+        def _get() -> dict[str, Any]:
+            import pythoncom
+
+            model = adapter.currentModel
+            config = adapter._attempt(
+                lambda: model.GetActiveConfiguration(), default=None
+            )
+            config_name = adapter._attempt(lambda: config.Name, default="") or ""
+
+            raw = adapter._attempt(
+                lambda: model.GetMaterialPropertyName2(
+                    config_name, pythoncom.Missing
+                ),
+                default=None,
+            )
+
+            # Late binding returns either the name or (name, database).
+            database = None
+            if isinstance(raw, (list, tuple)):
+                name = raw[0] if raw else None
+                if len(raw) > 1:
+                    database = raw[1]
+            else:
+                name = raw
+
+            name = str(name) if name else None
+            assigned = bool(name and name.strip())
+
+            # Density from the model itself: kg / m^3.
+            density = None
+            gmp = getattr(model, "GetMassProperties", None)
+            mass_raw = adapter._attempt(gmp, default=None) if callable(gmp) else gmp
+            if isinstance(mass_raw, (list, tuple)) and len(mass_raw) > 5:
+                volume_m3 = float(mass_raw[3])
+                mass_kg = float(mass_raw[5])
+                if volume_m3 > 0:
+                    density = mass_kg / volume_m3
+
+            return {
+                "assigned": assigned,
+                "name": name if assigned else None,
+                "database": str(database) if database else None,
+                "configuration": config_name or None,
+                "density": (
+                    {"value": density, "units": "kg/m^3"}
+                    if density is not None
+                    else None
+                ),
+                "notes": (
+                    "Density is derived from the model's mass and volume. "
+                    "Mechanical and thermal properties are not available "
+                    "through the SolidWorks COM material API and are omitted "
+                    "rather than estimated."
+                ),
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("get_material_properties", _get),
+        )

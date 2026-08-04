@@ -962,6 +962,27 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             lambda adapter: adapter.list_features(include_suppressed),
         )
 
+    async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
+        """Bounding box using pool."""
+        return await self._execute_with_pool(
+            "get_bounding_box", lambda adapter: adapter.get_bounding_box()
+        )
+
+    async def check_interference(
+        self, params: dict[str, Any] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Interference detection using pool."""
+        return await self._execute_with_pool(
+            "check_interference", lambda adapter: adapter.check_interference(params)
+        )
+
+    async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
+        """Material read using pool."""
+        return await self._execute_with_pool(
+            "get_material_properties",
+            lambda adapter: adapter.get_material_properties(),
+        )
+
     async def list_configurations(self) -> AdapterResult[list[str]]:
         """List model configurations using pool.
 
