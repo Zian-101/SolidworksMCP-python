@@ -671,7 +671,14 @@ class CreateAssemblyInput(CompatInput):
     template: str | None = Field(
         default=None, description="Assembly template file path"
     )
-    components: list[str] = Field(default_factory=list, description="Component list")
+    components: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Components to insert. NOT SUPPORTED: the assembly is created but "
+            "no component is inserted, and the response says so. Insert them "
+            "in the SolidWorks UI or via generate_vba_assembly_insert"
+        ),
+    )
 
 
 class CreateDrawingInput(CompatInput):
@@ -888,16 +895,31 @@ async def register_modeling_tools(
             if result.is_success:
                 model = result.data
                 assembly_name = _result_value(model, "name", default=input_data.name)
-                return {
+                payload: dict[str, Any] = {
                     "status": "success",
                     "message": f"Created new assembly: {assembly_name}",
                     "assembly": {
                         "name": assembly_name,
-                        "components": input_data.components,
+                        "components_inserted": 0,
                         "template": input_data.template,
                     },
                     "execution_time": result.execution_time,
                 }
+                if input_data.components:
+                    # The assembly really is created, but nothing is inserted.
+                    # This used to echo the requested components back inside a
+                    # "success" payload, which read as though they had been
+                    # added — an isometric render of the result was an empty
+                    # scene. Say so instead.
+                    payload["warning"] = (
+                        f"{len(input_data.components)} component(s) were "
+                        "requested but NONE were inserted: component insertion "
+                        "is not available through this adapter. Insert them in "
+                        "the SolidWorks UI, or generate a macro with "
+                        "generate_vba_assembly_insert."
+                    )
+                    payload["components_requested"] = input_data.components
+                return payload
             else:
                 return {
                     "status": "error",

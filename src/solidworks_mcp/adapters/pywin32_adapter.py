@@ -58,6 +58,56 @@ def _dynamic_dispatch(arg: Any) -> Any:
     return _dynamic_module.Dispatch(arg)
 
 
+#: How many times in a row a stale handle may trigger a reconnect before the
+#: adapter gives up and reports the error. Reset on a successful reconnect.
+_MAX_RECONNECT_ATTEMPTS = 2
+
+#: HRESULTs that mean "the object you are holding is gone", not "the call was
+#: wrong": RPC_E_DISCONNECTED, CO_E_OBJNOTCONNECTED, RPC_S_SERVER_UNAVAILABLE,
+#: RPC_S_CALL_FAILED, RPC_E_SERVERFAULT.
+_STALE_COM_HRESULTS = frozenset(
+    {-2147417848, -2147221164, -2147023174, -2147023170, -2147417851}
+)
+
+_STALE_COM_MARKERS = (
+    "rpc server is unavailable",
+    "the object invoked has disconnected",
+    "remote procedure call failed",
+    "call was rejected by callee",
+)
+
+
+def _is_stale_com(error: BaseException) -> bool:
+    """Report whether an exception means the SolidWorks handle is dead.
+
+    Two very different shapes have to be recognised.  A genuine dropped
+    connection raises ``pywintypes.com_error`` carrying an HRESULT.  But under
+    pywin32 late binding a dangling application pointer usually surfaces as
+    ``AttributeError: SldWorks.Application.<method>`` at attribute lookup
+    instead — which is why a plain ``except com_error`` branch never caught it
+    and the whole MCP server had to be restarted by hand.
+
+    Args:
+        error (BaseException): The exception raised by a COM call.
+
+    Returns:
+        bool: True when reconnecting is worth attempting.
+    """
+    if isinstance(error, AttributeError):
+        text = str(error)
+        return "SldWorks.Application." in text or "IModelDoc2." in text
+
+    hresult = None
+    args = getattr(error, "args", ())
+    if args and isinstance(args[0], int):
+        hresult = args[0]
+    if hresult in _STALE_COM_HRESULTS:
+        return True
+
+    lowered = str(error).lower()
+    return any(marker in lowered for marker in _STALE_COM_MARKERS)
+
+
 from loguru import logger  # noqa: E402
 
 T = TypeVar("T")
@@ -1656,6 +1706,13 @@ class PyWin32Adapter(
                 execution_time=execution_time,
             )
         except pywintypes.com_error as e:
+            if _is_stale_com(e) and self._reacquire_after_stale_com(operation_name):
+                return self._handle_com_operation(
+                    operation_name,
+                    operation_func,
+                    *operation_args,
+                    **operation_kwargs,
+                )
             execution_time = time.time() - start_time
             self.update_metrics(execution_time, False)
             return AdapterResult(
@@ -1664,6 +1721,13 @@ class PyWin32Adapter(
                 execution_time=execution_time,
             )
         except Exception as e:
+            if _is_stale_com(e) and self._reacquire_after_stale_com(operation_name):
+                return self._handle_com_operation(
+                    operation_name,
+                    operation_func,
+                    *operation_args,
+                    **operation_kwargs,
+                )
             execution_time = time.time() - start_time
             self.update_metrics(execution_time, False)
             return AdapterResult(
@@ -1671,6 +1735,73 @@ class PyWin32Adapter(
                 error=f"Error in {operation_name}: {e}",
                 execution_time=execution_time,
             )
+
+    def _reacquire_after_stale_com(self, operation_name: str) -> bool:
+        """Re-acquire ``swApp`` and ``currentModel`` after a dropped COM handle.
+
+        When the user quits and reopens SolidWorks, the pointer this process
+        grabbed at startup dangles and every subsequent call fails until the
+        whole MCP server is restarted.  This re-Dispatches the application and
+        re-reads the active document so the in-flight operation can be retried
+        once.
+
+        Guarded by ``_reconnect_in_progress`` so a failure *during* recovery
+        cannot recurse, and by ``_reconnect_attempts`` so a genuinely dead
+        SolidWorks does not turn every call into a reconnect storm.
+
+        Args:
+            operation_name (str): Operation being retried, for the log line.
+
+        Returns:
+            bool: True when a fresh application handle was obtained and the
+            caller should retry.
+        """
+        if getattr(self, "_reconnect_in_progress", False):
+            return False
+        if getattr(self, "_reconnect_attempts", 0) >= _MAX_RECONNECT_ATTEMPTS:
+            return False
+
+        self._reconnect_in_progress = True
+        self._reconnect_attempts = getattr(self, "_reconnect_attempts", 0) + 1
+        try:
+            logger.warning(
+                f"[pywin32.{operation_name}] SolidWorks COM handle went stale; "
+                "re-acquiring the application"
+            )
+            app = None
+            try:
+                raw = win32com.client.GetActiveObject("SldWorks.Application")
+                app = _dynamic_dispatch(raw) if raw is not None else None
+            except Exception:  # noqa: BLE001 - fall through to Dispatch
+                app = None
+            if app is None:
+                try:
+                    app = _dynamic_dispatch("SldWorks.Application")
+                except Exception:  # noqa: BLE001 - nothing to reconnect to
+                    return False
+            if app is None:
+                return False
+
+            self.swApp = app
+            self._attempt(lambda: sw_type_info.flag_methods(app, "ISldWorks"))
+
+            # The document pointer is stale for exactly the same reason.
+            model = self._attempt(lambda: app.ActiveDoc, default=None)
+            if model is not None:
+                doc_type = self._attempt(
+                    lambda: self._get_attr_or_call(model, "GetType"), default=None
+                )
+                if isinstance(doc_type, int):
+                    self._attempt(lambda: sw_type_info.flag_doc(model, doc_type))
+            self.currentModel = model
+
+            self._reconnect_attempts = 0
+            logger.info(
+                f"[pywin32.{operation_name}] re-acquired SolidWorks; retrying"
+            )
+            return True
+        finally:
+            self._reconnect_in_progress = False
 
     def _attempt(
         self, operation: Callable[[], T], default: T | None = None
