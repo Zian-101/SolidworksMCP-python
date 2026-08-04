@@ -1279,6 +1279,29 @@ class SolidWorksAdapter(ABC):
             error="insert_component is not implemented by this adapter",
         )
 
+    async def add_mate(
+        self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
+    ) -> "AdapterResult[Any]":
+        """Mate two components in the active assembly.
+
+        Args:
+            component_a (str): First component instance name.
+            component_b (str): Second component instance name.
+            entity_a (str): Named feature on the first component.
+            entity_b (str): Named feature on the second component.
+            mate_type (str): Mate type, e.g. ``"coincident"``.
+            alignment (str): ``aligned``, ``anti_aligned`` or ``closest``.
+            distance (float): Distance in millimetres for a distance mate.
+            angle (float): Angle in degrees for an angle mate.
+
+        Returns:
+            AdapterResult: Mate details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_mate is not implemented by this adapter",
+        )
+
     async def list_components(self) -> "AdapterResult[Any]":
         """List the top-level components of the active assembly.
 

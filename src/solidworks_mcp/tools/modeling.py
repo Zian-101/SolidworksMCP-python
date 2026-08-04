@@ -723,6 +723,58 @@ class InsertComponentInput(CompatInput):
             raise ValueError("file_path must not be empty")
 
 
+class AddMateInput(CompatInput):
+    """Input schema for mating two assembly components.
+
+    Attributes:
+        component_a (str): First component instance name.
+        component_b (str): Second component instance name.
+        entity_a (str): Named feature on the first component.
+        entity_b (str): Named feature on the second component.
+        mate_type (str): Mate type.
+        alignment (str): Mate alignment.
+        distance (float): Distance in millimetres for a distance mate.
+        angle (float): Angle in degrees for an angle mate.
+    """
+
+    component_a: str = Field(
+        description="First component instance name, as reported by list_components"
+    )
+    component_b: str = Field(description="Second component instance name")
+    entity_a: str = Field(
+        default="Front Plane",
+        description=(
+            "Named feature on the first component. Only tree features "
+            "(reference planes and axes) can be selected"
+        ),
+    )
+    entity_b: str = Field(
+        default="Front Plane", description="Named feature on the second component"
+    )
+    mate_type: str = Field(
+        default="coincident",
+        description=(
+            "coincident, concentric, perpendicular, parallel, tangent, "
+            "distance or angle"
+        ),
+    )
+    alignment: str = Field(
+        default="aligned", description="aligned, anti_aligned or closest"
+    )
+    distance: float = Field(
+        default=0.0, description="Distance in millimetres, for a distance mate"
+    )
+    angle: float = Field(
+        default=0.0, description="Angle in degrees, for an angle mate"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.component_a.strip() or not self.component_b.strip():
+            raise ValueError("component_a and component_b are required")
+        if self.component_a == self.component_b:
+            raise ValueError("a component cannot be mated to itself")
+
+
 class CreateAxisInput(CompatInput):
     """Input schema for creating a reference axis.
 
@@ -1986,6 +2038,71 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in insert_component tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def add_mate(input_data: AddMateInput) -> dict[str, Any]:
+        """Mate two components in the active assembly.
+
+        Positions components relative to one another — coincident planes to stack or
+        align them, concentric to line up axes, distance to hold a gap.
+
+        Entities are selected by feature name, so only each component's **reference
+        planes and axes** can be mated. Mating to a specific face or edge needs entity
+        names this adapter cannot enumerate.
+
+        The response reports the bounding box before and after plus ``geometry_moved``,
+        so you can see whether the mate actually repositioned anything.
+
+        Args:
+            input_data (AddMateInput): Components, entities and mate type.
+
+        Returns:
+            dict[str, Any]: Status and mate details.
+
+        Example:
+            ```python
+            components = await list_components()
+            await add_mate({
+                "component_a": components["components"][0],
+                "component_b": components["components"][1],
+                "mate_type": "coincident",
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, AddMateInput)
+            result = await adapter.add_mate(
+                input_data.component_a,
+                input_data.component_b,
+                input_data.entity_a,
+                input_data.entity_b,
+                input_data.mate_type,
+                input_data.alignment,
+                input_data.distance,
+                input_data.angle,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                moved = data.get("geometry_moved")
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Added {input_data.mate_type} mate between "
+                        f"{input_data.component_a} and {input_data.component_b}"
+                        + ("" if moved is None else
+                           " (geometry moved)" if moved else
+                           " (nothing moved - they already satisfied it)")
+                    ),
+                    "mate": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to add mate: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in add_mate tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

@@ -870,6 +870,25 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"file_path": file_path, "x": x, "y": y, "z": z},
         )
 
+    async def add_mate(
+        self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Mate creation through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "add_mate",
+            lambda: self.adapter.add_mate(component_a, component_b, entity_a, entity_b, mate_type, alignment, distance, angle),
+            input_dict={
+                "component_a": component_a,
+                "component_b": component_b,
+                "entity_a": entity_a,
+                "entity_b": entity_b,
+                "mate_type": mate_type,
+                "alignment": alignment,
+                "distance": distance,
+                "angle": angle,
+            },
+        )
+
     async def list_components(self) -> AdapterResult[Any]:
         """Component listing through circuit breaker."""
         return await self._execute_with_circuit_breaker(

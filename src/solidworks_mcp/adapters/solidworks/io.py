@@ -53,6 +53,55 @@ def _byref_int() -> Any:
     )
 
 
+#: ``swMateType_e`` values accepted by ``AddMate5``.
+_MATE_TYPES: dict[str, int] = {
+    "coincident": 0,
+    "concentric": 1,
+    "perpendicular": 2,
+    "parallel": 3,
+    "tangent": 4,
+    "distance": 5,
+    "angle": 6,
+}
+
+#: ``swMateAlign_e`` values.
+_MATE_ALIGNMENTS: dict[str, int] = {
+    "aligned": 0,
+    "anti_aligned": 1,
+    "closest": 2,
+}
+
+
+def _bounding_box_tuple(adapter: Any) -> tuple[float, ...] | None:
+    """Return the model's overall box, for before/after comparison.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+
+    Returns:
+        tuple[float, ...] | None: ``(minx, miny, minz, maxx, maxy, maxz)`` in
+        millimetres, or ``None`` when nothing measurable is present.
+    """
+    from .features import _get_bounding_box_impl
+
+    result = _get_bounding_box_impl(adapter)
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict):
+        return None
+    low, high = data.get("min", {}), data.get("max", {})
+    try:
+        return (
+            round(float(low["x"]), 3),
+            round(float(low["y"]), 3),
+            round(float(low["z"]), 3),
+            round(float(high["x"]), 3),
+            round(float(high["y"]), 3),
+            round(float(high["z"]), 3),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _doc_type(adapter: Any) -> int | None:
     """Return the active document's type: 1 part, 2 assembly, 3 drawing.
 
@@ -706,6 +755,193 @@ class SolidWorksIOMixin:
         return cast(
             AdapterResult[dict[str, Any]],
             adapter._handle_com_operation("insert_component", _insert),
+        )
+
+    async def add_mate(
+        self,
+        component_a: str,
+        component_b: str,
+        entity_a: str = "Front Plane",
+        entity_b: str = "Front Plane",
+        mate_type: str = "coincident",
+        alignment: str = "aligned",
+        distance: float = 0.0,
+        angle: float = 0.0,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mate two components together.
+
+        Wraps ``IAssemblyDoc::AddMate5``.  The two entities are selected via
+        ``IComponent2::FeatureByName`` + ``IFeature::Select2`` rather than
+        ``SelectByID2``, which raises ``Type mismatch`` on this build.
+
+        That restricts the entities to *named tree features* — the reference
+        planes and axes of each component.  Plane-to-plane mating covers
+        alignment and stacking, which is the common case; mating to a specific
+        face or edge needs entity names this adapter cannot enumerate.
+
+        Args:
+            component_a (str): First component instance name, as reported by
+                :meth:`list_components`.
+            component_b (str): Second component instance name.
+            entity_a (str): Named feature on the first component.
+            entity_b (str): Named feature on the second component.
+            mate_type (str): ``coincident``, ``concentric``, ``perpendicular``,
+                ``parallel``, ``tangent``, ``distance`` or ``angle``.
+            alignment (str): ``aligned``, ``anti_aligned`` or ``closest``.
+            distance (float): Distance in millimetres, for a distance mate.
+            angle (float): Angle in degrees, for an angle mate.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: The mate created, plus the bounding
+            box before and after so the caller can see what moved.  ``ERROR``
+            when the entities cannot be selected or SolidWorks rejects the
+            mate.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+
+        Example::
+
+            await adapter.add_mate("plate-1", "plate-2")
+        """
+        adapter = self._adapter(self)
+        if _doc_type(adapter) != 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="add_mate requires an assembly document",
+            )
+
+        mate_key = str(mate_type).strip().lower()
+        if mate_key not in _MATE_TYPES:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    f"Unknown mate type '{mate_type}'. "
+                    f"Use one of: {', '.join(sorted(_MATE_TYPES))}."
+                ),
+            )
+        align_key = str(alignment).strip().lower()
+        if align_key not in _MATE_ALIGNMENTS:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    f"Unknown alignment '{alignment}'. "
+                    f"Use one of: {', '.join(sorted(_MATE_ALIGNMENTS))}."
+                ),
+            )
+
+        def _mate() -> dict[str, Any]:
+            import math
+
+            model = adapter.currentModel
+            assembly = _sw_type_info.flagged(model, "IAssemblyDoc")
+
+            components = adapter._attempt(
+                lambda: assembly.GetComponents(True), default=None
+            )
+            if not isinstance(components, (list, tuple)):
+                raise Exception("Could not read the assembly's components")
+
+            wanted = {component_a: entity_a, component_b: entity_b}
+            found: dict[str, Any] = {}
+            for component in components:
+                wrapped = _as_com(adapter, component, "IComponent2")
+                if wrapped is None:
+                    continue
+                name = adapter._attempt(lambda w=wrapped: w.Name2, default=None)
+                if name and str(name) in wanted:
+                    found[str(name)] = wrapped
+
+            missing = [n for n in (component_a, component_b) if n not in found]
+            if missing:
+                available = [
+                    str(adapter._attempt(lambda c=c: _as_com(adapter, c, "IComponent2").Name2, default="?"))
+                    for c in components
+                ]
+                raise Exception(
+                    f"Component(s) not found: {', '.join(missing)}. "
+                    f"The assembly holds: {', '.join(available)}."
+                )
+
+            adapter._attempt(lambda: model.ClearSelection2(True), default=None)
+            for index, component_name in enumerate((component_a, component_b)):
+                wrapped = found[component_name]
+                entity_name = wanted[component_name]
+                feature = adapter._attempt(
+                    lambda w=wrapped, e=entity_name: w.FeatureByName(e), default=None
+                )
+                if feature is None:
+                    raise Exception(
+                        f"'{entity_name}' not found on {component_name}. "
+                        "Only named tree features (reference planes and axes) "
+                        "can be selected here."
+                    )
+                flagged = _as_com(adapter, feature, "IFeature")
+                if flagged is None or not adapter._attempt(
+                    lambda f=flagged, a=index > 0: f.Select2(a, 0), default=False
+                ):
+                    raise Exception(
+                        f"Failed to select '{entity_name}' on {component_name}"
+                    )
+
+            selected = adapter._attempt(
+                lambda: model.SelectionManager.GetSelectedObjectCount2(-1), default=0
+            )
+            if selected != 2:
+                raise Exception(
+                    f"Expected 2 selected entities for the mate, got {selected}"
+                )
+
+            box_before = _bounding_box_tuple(adapter)
+            status = _byref_int()
+            mate = adapter._attempt(
+                lambda: assembly.AddMate5(
+                    _MATE_TYPES[mate_key],
+                    _MATE_ALIGNMENTS[align_key],
+                    False,  # Flip
+                    distance / 1000.0,  # Distance (m)
+                    distance / 1000.0,  # upper limit
+                    distance / 1000.0,  # lower limit
+                    0.0,  # gear ratio numerator
+                    0.0,  # gear ratio denominator
+                    math.radians(float(angle)),
+                    math.radians(float(angle)),
+                    math.radians(float(angle)),
+                    False,  # ForPositioningOnly
+                    False,  # LockRotation
+                    0,  # WidthMateOption
+                    status,
+                ),
+                default=None,
+            )
+            adapter._attempt(lambda: model.EditRebuild3(), default=None)
+
+            error_status = getattr(status, "value", None)
+            # swAddMateError_e reports 1 for success on this build (measured:
+            # a mate that demonstrably moved a component returned 1).
+            if mate is None or (error_status not in (None, 1)):
+                raise Exception(
+                    f"SolidWorks rejected the {mate_key} mate "
+                    f"(error status {error_status!r}). Check the two entities "
+                    "can actually satisfy this mate type."
+                )
+
+            box_after = _bounding_box_tuple(adapter)
+            return {
+                "mate_type": mate_key,
+                "alignment": align_key,
+                "components": [component_a, component_b],
+                "entities": [entity_a, entity_b],
+                "distance": distance or None,
+                "angle": angle or None,
+                "bounding_box_before": box_before,
+                "bounding_box_after": box_after,
+                "geometry_moved": box_before != box_after,
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("add_mate", _mate),
         )
 
     async def list_components(self) -> AdapterResult[list[str]]:

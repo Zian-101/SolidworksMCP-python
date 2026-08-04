@@ -1927,6 +1927,39 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["model_operation"],
         )
 
+    async def add_mate(
+        self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Mock mate creation.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        known = {
+            "coincident", "concentric", "perpendicular", "parallel",
+            "tangent", "distance", "angle",
+        }
+        if mate_type not in known:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=f"Unknown mate type '{mate_type}'",
+            )
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "mate_type": mate_type,
+                "alignment": alignment,
+                "components": [component_a, component_b],
+                "entities": [entity_a, entity_b],
+                "distance": distance or None,
+                "angle": angle or None,
+                "geometry_moved": True,
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
     async def list_components(self) -> AdapterResult[Any]:
         """Mock component listing.
 

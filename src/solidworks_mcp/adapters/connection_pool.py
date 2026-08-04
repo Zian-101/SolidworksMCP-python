@@ -767,6 +767,14 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             lambda adapter: adapter.insert_component(file_path, x, y, z),
         )
 
+    async def add_mate(
+        self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Mate creation using pool."""
+        return await self._execute_with_pool(
+            "add_mate", lambda adapter: adapter.add_mate(component_a, component_b, entity_a, entity_b, mate_type, alignment, distance, angle)
+        )
+
     async def list_components(self) -> AdapterResult[Any]:
         """Component listing using pool."""
         return await self._execute_with_pool(
