@@ -1209,6 +1209,57 @@ class SolidWorksAdapter(ABC):
             error="delete_body is not implemented by this adapter",
         )
 
+    async def delete_face(
+        self, faces: list[int] | None = None
+    ) -> "AdapterResult[Any]":
+        """Remove faces from a solid, healing the opening.
+
+        Args:
+            faces (list[int] | None): Face indices to remove.
+
+        Returns:
+            AdapterResult: Face counts before and after, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="delete_face is not implemented by this adapter",
+        )
+
+    async def scale_model(
+        self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
+    ) -> "AdapterResult[Any]":
+        """Scale the model about its centroid.
+
+        Args:
+            factor (float): X factor, and all axes when uniform.
+            factor_y (float): Y factor; ``0`` means uniform.
+            factor_z (float): Z factor; ``0`` means uniform.
+
+        Returns:
+            AdapterResult: Factors applied and the volume ratio, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="scale_model is not implemented by this adapter",
+        )
+
+    async def set_material(
+        self, name: str, database: str | None = None
+    ) -> "AdapterResult[Any]":
+        """Assign a material to the active part.
+
+        Args:
+            name (str): Material name as it appears in the library.
+            database (str | None): Path to a ``.sldmat`` file.
+
+        Returns:
+            AdapterResult: The material assigned afterwards, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="set_material is not implemented by this adapter",
+        )
+
     async def get_bounding_box(self) -> "AdapterResult[Any]":
         """Measure the axis-aligned bounding box of the model's solid bodies.
 

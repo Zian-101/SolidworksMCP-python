@@ -18,6 +18,50 @@ except ImportError:  # pragma: no cover
     win32com = SimpleNamespace(client=SimpleNamespace())
 
 
+def _byref_bstr() -> Any:
+    """Return a byref string VARIANT for a SolidWorks out-parameter.
+
+    pywin32's makepy wrapper marks SolidWorks' pass-by-ref out-parameters as
+    required inputs.  ``pythoncom.Missing`` does not satisfy them: measured
+    live, ``GetMaterialPropertyName2(config, pythoncom.Missing)`` *raises*,
+    while the same call with a byref VARIANT returns the material name and
+    fills the VARIANT with the library name.  The same trap governs
+    ``OpenDoc6``.
+
+    Returns:
+        Any: A ``VARIANT(VT_BYREF | VT_BSTR, "")``, or ``""`` when pywin32 is
+        unavailable (test/mock environments).
+    """
+    variant_ctor = getattr(getattr(win32com, "client", None), "VARIANT", None)
+    if not callable(variant_ctor):
+        return ""
+    return variant_ctor(
+        int(getattr(pythoncom, "VT_BYREF", 0)) | int(getattr(pythoncom, "VT_BSTR", 0)),
+        "",
+    )
+
+
+def _read_material_name(adapter: Any, model: Any, config_name: str) -> tuple[Any, Any]:
+    """Read the assigned material name and its library.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        model: The part document.
+        config_name: Configuration to read.
+
+    Returns:
+        tuple[Any, Any]: ``(name, database)``; either may be ``None``.
+    """
+    holder = _byref_bstr()
+    name = adapter._attempt(
+        lambda: model.GetMaterialPropertyName2(config_name, holder), default=None
+    )
+    if isinstance(name, (list, tuple)):
+        name = name[0] if name else None
+    database = getattr(holder, "value", None)
+    return name, database
+
+
 class SolidWorksIOMixin:
     """Expose model open/save/create/configuration methods through a mixin."""
 
@@ -817,6 +861,137 @@ class SolidWorksIOMixin:
             adapter._handle_com_operation("check_interference", _check),
         )
 
+    async def set_material(
+        self, name: str, database: str | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Assign a material to the active part.
+
+        Wraps ``IPartDoc::SetMaterialPropertyName2(ConfigName, Database,
+        Name)``.  When ``database`` is omitted the stock SolidWorks library is
+        located from the application's install path, since the call needs a
+        real ``.sldmat`` file rather than a bare library name.
+
+        The assignment is confirmed by reading the material back — the setter
+        returns nothing useful, so it cannot be trusted on its own.
+
+        Args:
+            name (str): Material name exactly as it appears in the library,
+                e.g. ``"Plain Carbon Steel"`` or ``"6061 Alloy"``.
+            database (str | None): Path to a ``.sldmat`` file. Defaults to the
+                stock ``solidworks materials.sldmat``.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: The material that is actually
+            assigned afterwards.  ``ERROR`` when the active document is not a
+            part or the name did not take.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+
+        Example::
+
+            await adapter.set_material("Plain Carbon Steel")
+        """
+        adapter = self._adapter(self)
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+        if not name or not str(name).strip():
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="set_material requires a material name",
+            )
+
+        doc_type = adapter._attempt(
+            lambda: adapter.currentModel.GetType(), default=None
+        )
+        if doc_type != 1:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    "set_material requires a part document "
+                    f"(active document type is {doc_type!r}, expected 1)"
+                ),
+            )
+
+        def _set() -> dict[str, Any]:
+            model = adapter.currentModel
+            config = adapter._attempt(
+                lambda: model.GetActiveConfiguration(), default=None
+            )
+            config_name = adapter._attempt(lambda: config.Name, default="") or ""
+
+            resolved_db = database or self._default_material_database()
+            adapter._attempt(
+                lambda: model.SetMaterialPropertyName2(
+                    config_name, resolved_db or "", str(name)
+                ),
+                default=None,
+            )
+            adapter._attempt(lambda: model.ForceRebuild3(False), default=None)
+
+            # The setter reports nothing useful; read the material back.
+            applied, library = _read_material_name(adapter, model, config_name)
+            applied = str(applied) if applied else None
+
+            if not applied or applied.strip().lower() != str(name).strip().lower():
+                raise Exception(
+                    f"Material did not take: asked for '{name}', the part now "
+                    f"reports {applied!r}. Check the name matches the library "
+                    f"exactly (database: {resolved_db or '<default>'})."
+                )
+
+            return {
+                "name": applied,
+                "database": str(library) if library else resolved_db,
+                "configuration": config_name or None,
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("set_material", _set),
+        )
+
+    def _default_material_database(self) -> str:
+        """Locate the stock SolidWorks material library.
+
+        ``SetMaterialPropertyName2`` wants a real ``.sldmat`` path, not a
+        library name, so this walks out from the running executable.
+
+        Returns:
+            str: Absolute path to ``solidworks materials.sldmat``, or ``""``
+            when it cannot be found.
+        """
+        adapter = self._adapter(self)
+        app = adapter.swApp
+        if app is None:
+            return ""
+
+        exe = adapter._attempt(
+            lambda: adapter._get_attr_or_call(app, "GetExecutablePath"), default=None
+        )
+        if not isinstance(exe, str) or not exe:
+            return ""
+
+        root = exe if os.path.isdir(exe) else os.path.dirname(exe)
+        for language in ("english", "Engl.ish"):
+            candidate = os.path.join(
+                root, "lang", language, "sldmaterials", "solidworks materials.sldmat"
+            )
+            if os.path.exists(candidate):
+                return candidate
+
+        lang_root = os.path.join(root, "lang")
+        if os.path.isdir(lang_root):
+            for entry in os.listdir(lang_root):
+                candidate = os.path.join(
+                    lang_root, entry, "sldmaterials", "solidworks materials.sldmat"
+                )
+                if os.path.exists(candidate):
+                    return candidate
+        return ""
+
     async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
         """Read the material actually assigned to the active part.
 
@@ -846,30 +1021,13 @@ class SolidWorksIOMixin:
             )
 
         def _get() -> dict[str, Any]:
-            import pythoncom
-
             model = adapter.currentModel
             config = adapter._attempt(
                 lambda: model.GetActiveConfiguration(), default=None
             )
             config_name = adapter._attempt(lambda: config.Name, default="") or ""
 
-            raw = adapter._attempt(
-                lambda: model.GetMaterialPropertyName2(
-                    config_name, pythoncom.Missing
-                ),
-                default=None,
-            )
-
-            # Late binding returns either the name or (name, database).
-            database = None
-            if isinstance(raw, (list, tuple)):
-                name = raw[0] if raw else None
-                if len(raw) > 1:
-                    database = raw[1]
-            else:
-                name = raw
-
+            name, database = _read_material_name(adapter, model, config_name)
             name = str(name) if name else None
             assigned = bool(name and name.strip())
 

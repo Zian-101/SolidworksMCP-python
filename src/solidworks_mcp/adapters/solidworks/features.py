@@ -131,6 +131,16 @@ class SolidWorksFeaturesMixin:
     ) -> AdapterResult[dict[str, Any]]:
         return _delete_body_impl(self, bodies or [])
 
+    async def delete_face(
+        self, faces: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        return _delete_face_impl(self, faces or [])
+
+    async def scale_model(
+        self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
+    ) -> AdapterResult[dict[str, Any]]:
+        return _scale_model_impl(self, factor, factor_y, factor_z)
+
     async def pattern_circular(
         self,
         features: list[str],
@@ -1060,6 +1070,20 @@ def _solid_bodies(adapter: Any) -> list[Any]:
     return sorted(bodies, key=_corner)
 
 
+def _flag_and_return(obj: Any, interface: str) -> Any:
+    """Flag a COM object's methods for an interface and hand it back.
+
+    Args:
+        obj: The COM object.
+        interface: Interface name, e.g. ``"IFace2"``.
+
+    Returns:
+        Any: The same object, with its methods resolvable.
+    """
+    _flag_feature_methods(obj, interface)
+    return obj
+
+
 def _select_body(adapter: Any, body: Any, mark: int, append: bool) -> bool:
     """Select a solid body under a selection mark.
 
@@ -1389,6 +1413,213 @@ def _boxes_match(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
         bool: True when every corner matches.
     """
     return len(a) == len(b) and all(abs(x - y) < 1e-3 for x, y in zip(a, b))
+
+
+def _scale_model_impl(
+    adapter: Any, factor: float, factor_y: float, factor_z: float
+) -> AdapterResult[dict[str, Any]]:
+    """Scale the model about its centroid.
+
+    Wraps ``IModelDoc2::InsertScale(Type, Uniform, Xscale, YScale, ZScale)``.
+    ``Type`` 0 is ``swScaleAbout_Centroid``.
+
+    Volume scales with the product of the three factors, which makes this
+    exactly verifiable: a uniform factor *f* must multiply the volume by
+    *f³*.  The guard checks that ratio rather than merely "did the volume
+    change".
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        factor: Scale factor along X, and along all axes when uniform.
+        factor_y: Y factor; ``0`` means uniform.
+        factor_z: Z factor; ``0`` means uniform.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: The factors applied and the measured
+        volume ratio.  ``ERROR`` when the volume does not move as predicted.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        await adapter.scale_model(2.0)   # 8x the volume
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+    if factor <= 0:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="scale_model requires a positive factor",
+        )
+
+    uniform = not (factor_y or factor_z)
+    sy = factor if uniform else (factor_y or factor)
+    sz = factor if uniform else (factor_z or factor)
+
+    def _scale_operation() -> dict[str, Any]:
+        """Inner COM closure: scale, then check the volume ratio."""
+        volume_before = _model_volume(adapter)
+        if not volume_before:
+            raise Exception("Cannot scale a model with no measurable volume")
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+        # Use the FeatureManager overload deliberately: IModelDoc2::InsertScale
+        # is (ScaleFactor_x, ScaleFactor_y, ScaleFactor_z, IsUniform) - a
+        # different arity *and* order - so calling it with these arguments
+        # passes 0 as the X factor and silently does nothing.
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = adapter._attempt(
+            lambda: feature_manager.InsertScale(
+                0,  # Type: about centroid
+                bool(uniform),  # Uniform
+                float(factor),  # Xscale
+                float(sy),  # YScale
+                float(sz),  # ZScale
+            ),
+            default=None,
+        )
+
+        volume_after = _model_volume(adapter, rebuild=True)
+        expected = factor * sy * sz
+        ratio = volume_after / volume_before if volume_before else 0.0
+        if abs(ratio - expected) > max(expected * 0.005, 1e-9):
+            raise Exception(
+                f"Scale did not apply as asked: volume ratio is {ratio:.5g}, "
+                f"expected {expected:.5g} for factors "
+                f"({factor}, {sy}, {sz})."
+            )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"), default="Scale"
+                )
+                if feature
+                else "Scale"
+            ),
+            "factors": {"x": float(factor), "y": float(sy), "z": float(sz)},
+            "uniform": bool(uniform),
+            "volume_ratio": round(ratio, 6),
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("scale_model", _scale_operation),
+    )
+
+
+def _delete_face_impl(adapter: Any, faces: list[int]) -> AdapterResult[dict[str, Any]]:
+    """Remove faces from a solid, healing the surrounding surfaces.
+
+    Wraps ``IModelDoc2::InsertDeleteFace2(Refill)`` with the faces preselected,
+    falling back to ``IModelDocExtension::InsertDeleteFace(Option)``.  Note
+    that ``DeleteFaces2`` lives on **IBody2**, not on ``FeatureManager``: it is
+    direct body surgery that leaves no feature behind, and calling it on the
+    feature manager raises ``AttributeError: <unknown>.DeleteFaces2``.
+
+    Faces are addressed by index into :func:`_body_faces`, the same as
+    ``create_shell`` and ``add_draft``.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        faces: Face indices to remove.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Face counts before and after.
+        ``ERROR`` when an index is out of range or nothing was removed.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        await adapter.delete_face([3])
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+    if not faces:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="delete_face requires at least one face index",
+        )
+
+    def _delete_face_operation() -> dict[str, Any]:
+        """Inner COM closure: resolve faces, then delete and heal."""
+        all_faces = _body_faces(adapter)
+        count_before = len(all_faces)
+        if not all_faces:
+            raise Exception("No solid body found")
+        if len(faces) >= count_before:
+            raise Exception(
+                f"Refusing to delete {len(faces)} of {count_before} faces - "
+                "that would leave nothing to heal."
+            )
+
+        for index in faces:
+            if index < 0 or index >= count_before:
+                raise Exception(
+                    f"face index {index} out of range - the body has "
+                    f"{count_before} faces (0-{count_before - 1})"
+                )
+
+        volume_before = _model_volume(adapter)
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+        for position, index in enumerate(faces):
+            target = _flag_and_return(all_faces[index], "IFace2")
+            if not adapter._attempt(
+                lambda t=target, p=position: t.Select2(p > 0, 0), default=False
+            ):
+                raise Exception(f"Failed to select face {index}")
+
+        # Option 1 (delete and patch) is the only variant that heals.
+        # Measured live on a block with a through hole: option 1 gives
+        # 7 -> 6 faces and restores the volume to the un-drilled 32000 mm3,
+        # while option 0 and InsertDeleteFace2 leave 0 faces and 0 bodies
+        # (the solid is gone) and option 2 changes nothing.  All of them
+        # return True, so the COM return value proves nothing here.
+        adapter._attempt(
+            lambda: adapter.currentModel.Extension.InsertDeleteFace(1), default=None
+        )
+        adapter._attempt(
+            lambda: adapter.currentModel.ForceRebuild3(False), default=None
+        )
+
+        count_after = len(_body_faces(adapter))
+        volume_after = _model_volume(adapter)
+
+        # Order matters: check the solid survived BEFORE celebrating a lower
+        # face count, because destroying the body also lowers it.
+        if not _solid_bodies(adapter) or volume_after <= 0:
+            raise Exception(
+                "Delete-face destroyed the solid instead of healing it "
+                f"(volume {volume_before:.4g} -> {volume_after:.4g}). "
+                "The opening left behind could not be patched - try a face "
+                "whose surrounding surfaces can close over it."
+            )
+        if count_after >= count_before:
+            raise Exception(
+                f"Delete-face removed nothing - the body still has "
+                f"{count_after} faces (was {count_before})."
+            )
+
+        return {
+            "name": "Delete-Face",
+            "deleted": list(faces),
+            "faces_before": count_before,
+            "faces_after": count_after,
+            "volume_change": volume_after - volume_before,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("delete_face", _delete_face_operation),
+    )
 
 
 def _delete_body_impl(adapter: Any, bodies: list[int]) -> AdapterResult[dict[str, Any]]:

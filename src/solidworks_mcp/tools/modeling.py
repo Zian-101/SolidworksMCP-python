@@ -635,6 +635,72 @@ class DeleteBodyInput(CompatInput):
             raise ValueError("bodies must contain at least one body index")
 
 
+class DeleteFaceInput(CompatInput):
+    """Input schema for removing faces from a solid.
+
+    Attributes:
+        faces (list[int]): Face indices to remove.
+    """
+
+    faces: list[int] = Field(
+        default_factory=list, description="Indices of the faces to remove"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.faces:
+            raise ValueError("faces must contain at least one face index")
+
+
+class ScaleModelInput(CompatInput):
+    """Input schema for scaling the model about its centroid.
+
+    Attributes:
+        factor (float): X factor, and all axes when uniform.
+        factor_y (float): Y factor; 0 means uniform.
+        factor_z (float): Z factor; 0 means uniform.
+    """
+
+    factor: float = Field(
+        description="Scale factor. Applies to all axes unless factor_y/z are given"
+    )
+    factor_y: float = Field(
+        default=0.0, description="Y factor; leave at 0 for a uniform scale"
+    )
+    factor_z: float = Field(
+        default=0.0, description="Z factor; leave at 0 for a uniform scale"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.factor <= 0:
+            raise ValueError("factor must be positive")
+        if self.factor_y < 0 or self.factor_z < 0:
+            raise ValueError("factor_y and factor_z cannot be negative")
+
+
+class SetMaterialInput(CompatInput):
+    """Input schema for assigning a material.
+
+    Attributes:
+        name (str): Material name as it appears in the library.
+        database (str | None): Path to a .sldmat library file.
+    """
+
+    name: str = Field(
+        description=(
+            "Material name exactly as it appears in the library, "
+            "e.g. 'Plain Carbon Steel' or '6061 Alloy'"
+        )
+    )
+    database: str | None = Field(
+        default=None,
+        description="Path to a .sldmat file; defaults to the stock SolidWorks library",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.name or not self.name.strip():
+            raise ValueError("name must not be empty")
+
+
 class CreateAxisInput(CompatInput):
     """Input schema for creating a reference axis.
 
@@ -1706,6 +1772,140 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in delete_body tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def delete_face(input_data: DeleteFaceInput) -> dict[str, Any]:
+        """Remove faces from a solid and heal the opening.
+
+        Creates a Delete-Face feature — the usual way to remove an unwanted hole or
+        boss without editing the feature that made it. The surrounding surfaces are
+        extended to close the gap.
+
+        Faces are addressed by index; indices are stable for a given model. The tool
+        checks the solid survived, not just that the face count dropped: deleting a
+        face whose opening cannot be patched destroys the body, and SolidWorks reports
+        that as success.
+
+        Args:
+            input_data (DeleteFaceInput): Face indices to remove.
+
+        Returns:
+            dict[str, Any]: Status, face counts and the volume change.
+
+        Example:
+            ```python
+            # Remove a through hole; volume goes back up as the hole fills in
+            await delete_face({"faces": [6]})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, DeleteFaceInput)
+            result = await adapter.delete_face(input_data.faces)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Removed {len(input_data.faces)} face(s), "
+                        f"{data.get('faces_after', '?')} remaining"
+                    ),
+                    "delete_face": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to delete face: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in delete_face tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def scale_model(input_data: ScaleModelInput) -> dict[str, Any]:
+        """Scale the model about its centroid.
+
+        Creates a Scale feature. Give ``factor`` alone for a uniform scale, or add
+        ``factor_y``/``factor_z`` to stretch along one axis.
+
+        Volume scales with the product of the three factors, so the result is checked
+        against that exactly — a uniform factor of 2 must multiply the volume by 8.
+
+        Args:
+            input_data (ScaleModelInput): Scale factors.
+
+        Returns:
+            dict[str, Any]: Status, the factors applied and the measured volume ratio.
+
+        Example:
+            ```python
+            await scale_model({"factor": 2.0})              # 8x the volume
+            await scale_model({"factor": 2.0, "factor_y": 1.0, "factor_z": 1.0})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, ScaleModelInput)
+            result = await adapter.scale_model(
+                input_data.factor, input_data.factor_y, input_data.factor_z
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Scaled by {input_data.factor} "
+                        f"(volume ratio {data.get('volume_ratio', '?')})"
+                    ),
+                    "scale": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to scale model: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in scale_model tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def set_material(input_data: SetMaterialInput) -> dict[str, Any]:
+        """Assign a material to the active part.
+
+        Sets the material and confirms it by reading it back — the SolidWorks setter
+        reports nothing useful, and an unknown material name is silently ignored, so a
+        misspelled name would otherwise look like it worked.
+
+        Assigning a material also gives ``get_mass_properties`` a real density, so mass
+        figures become meaningful rather than the 1000 kg/m3 default.
+
+        Args:
+            input_data (SetMaterialInput): Material name and optional library.
+
+        Returns:
+            dict[str, Any]: Status and the material actually assigned.
+
+        Example:
+            ```python
+            await set_material({"name": "6061 Alloy"})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, SetMaterialInput)
+            result = await adapter.set_material(input_data.name, input_data.database)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Assigned material: {data.get('name', input_data.name)}",
+                    "material": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to set material: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in set_material tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

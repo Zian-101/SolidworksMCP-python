@@ -826,6 +826,40 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"bodies": bodies},
         )
 
+    async def delete_face(
+        self, faces: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Face deletion through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "delete_face",
+            lambda: self.adapter.delete_face(faces),
+            input_dict={"faces": faces},
+        )
+
+    async def scale_model(
+        self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
+    ) -> AdapterResult[dict[str, Any]]:
+        """Scale through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "scale_model",
+            lambda: self.adapter.scale_model(factor, factor_y, factor_z),
+            input_dict={
+                "factor": factor,
+                "factor_y": factor_y,
+                "factor_z": factor_z,
+            },
+        )
+
+    async def set_material(
+        self, name: str, database: str | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Material assignment through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "set_material",
+            lambda: self.adapter.set_material(name, database),
+            input_dict={"name": name, "database": database},
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation through circuit breaker."""
         return await self._execute_with_circuit_breaker(

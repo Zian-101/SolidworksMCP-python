@@ -733,6 +733,31 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             "delete_body", lambda adapter: adapter.delete_body(bodies)
         )
 
+    async def delete_face(
+        self, faces: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Face deletion using pool."""
+        return await self._execute_with_pool(
+            "delete_face", lambda adapter: adapter.delete_face(faces)
+        )
+
+    async def scale_model(
+        self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
+    ) -> AdapterResult[dict[str, Any]]:
+        """Scale using pool."""
+        return await self._execute_with_pool(
+            "scale_model",
+            lambda adapter: adapter.scale_model(factor, factor_y, factor_z),
+        )
+
+    async def set_material(
+        self, name: str, database: str | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Material assignment using pool."""
+        return await self._execute_with_pool(
+            "set_material", lambda adapter: adapter.set_material(name, database)
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation using pool."""
         return await self._execute_with_pool(

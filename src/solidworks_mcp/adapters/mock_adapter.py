@@ -1805,6 +1805,104 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["feature_operation"],
         )
 
+    async def delete_face(
+        self, faces: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock face deletion.
+
+        Args:
+            faces (list[int] | None): Face indices to remove.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Deletion payload.
+        """
+        targets = list(faces or [])
+        if not targets:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="delete_face requires at least one face index",
+            )
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": "Delete-Face",
+                "deleted": targets,
+                "faces_before": 7,
+                "faces_after": 7 - len(targets),
+                "volume_change": 2.0e-6,
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
+    async def scale_model(
+        self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock scale.
+
+        Args:
+            factor (float): X factor, and all axes when uniform.
+            factor_y (float): Y factor; ``0`` means uniform.
+            factor_z (float): Z factor; ``0`` means uniform.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Scale payload.
+        """
+        if factor <= 0:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="scale_model requires a positive factor",
+            )
+
+        uniform = not (factor_y or factor_z)
+        sy = factor if uniform else (factor_y or factor)
+        sz = factor if uniform else (factor_z or factor)
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Scale{random.randint(1, 99)}",
+                "factors": {"x": factor, "y": sy, "z": sz},
+                "uniform": uniform,
+                "volume_ratio": round(factor * sy * sz, 6),
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
+    async def set_material(
+        self, name: str, database: str | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock material assignment.
+
+        Args:
+            name (str): Material name.
+            database (str | None): Library path.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Assigned material payload.
+        """
+        if not name or not str(name).strip():
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="set_material requires a material name",
+            )
+
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": name,
+                "database": database or "SOLIDWORKS Materials",
+                "configuration": "Default",
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Mock reference axis creation.
 
