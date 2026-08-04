@@ -367,34 +367,58 @@ def _create_revolve_impl(
 
         import math
 
+        # Select the profile sketch.  FeatureRevolve2 acts on the current
+        # selection; without this the call has nothing to revolve and returns
+        # None.  Uses the flagged tree walk (raw GetTypeName2/GetNextFeature
+        # property reads find nothing under pywin32 late binding).
+        volume_before = _model_volume(adapter)
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+        for candidate in (
+            ([_profile_feature_names(adapter)[-1]] if _profile_feature_names(adapter) else [])
+            + ([adapter._last_sketch_name] if adapter._last_sketch_name else [])
+        ):
+            if _select_feature_by_name(adapter, candidate):
+                adapter._last_sketch_name = candidate
+                break
+
         if revolve_sw_major == 33:
-            # IFeatureManager.FeatureRevolve2 (20 params) per gen_py SW 2025
-            # SingleDir, IsSolid, IsThin, IsCut, ReverseDir, BothDirUpToSame,
-            # Dir1Type, Dir2Type, Dir1Angle(rad), Dir2Angle(rad),
-            # OffsetRev1/2, OffsetDist1/2, Merge, ThinThick1/2(m), AutoSelect, Propagate
+            # IFeatureManager.FeatureRevolve2 - exact 20-parameter signature
+            # read from the live gen_py type library for SW 2025:
+            #   SingleDir, IsSolid, IsThin, IsCut, ReverseDir,
+            #   BothDirectionUpToSameEntity, Dir1Type, Dir2Type,
+            #   Dir1Angle(rad), Dir2Angle(rad), OffsetReverse1, OffsetReverse2,
+            #   OffsetDistance1, OffsetDistance2, ThinType,
+            #   ThinThickness1(m), ThinThickness2(m), Merge,
+            #   UseFeatScope, UseAutoSelect
+            # The previous version passed 19 args AND placed Merge where
+            # ThinType belongs, so every revolve failed.
             feature_manager = adapter.currentModel.FeatureManager
+            is_thin = bool(params.thin_feature and params.thin_thickness)
             feature = feature_manager.FeatureRevolve2(
-                True,  # SingleDir
+                not params.both_directions,  # SingleDir
                 True,  # IsSolid
-                False,  # IsThin
+                is_thin,  # IsThin
                 False,  # IsCut
                 params.reverse_direction,  # ReverseDir
-                params.both_directions,  # BothDirUpToSame
-                0,
-                0,  # Dir1Type, Dir2Type
+                False,  # BothDirectionUpToSameEntity
+                0,  # Dir1Type (swEndCondBlind)
+                0,  # Dir2Type
                 params.angle * math.pi / 180.0,  # Dir1Angle (rad)
                 (params.angle * math.pi / 180.0)
                 if params.both_directions
                 else 0.0,  # Dir2Angle
-                False,
-                False,  # OffsetRev1/2
-                0.0,
-                0.0,  # OffsetDist1/2
+                False,  # OffsetReverse1
+                False,  # OffsetReverse2
+                0.0,  # OffsetDistance1
+                0.0,  # OffsetDistance2
+                0,  # ThinType
+                (params.thin_thickness or 0.0) / 1000.0,  # ThinThickness1
+                0.0,  # ThinThickness2
                 params.merge_result,  # Merge
-                (params.thin_thickness or 0.0) / 1000.0,
-                0.0,  # ThinThick1/2
-                True,  # AutoSelect
-                False,  # Propagate
+                False,  # UseFeatScope
+                True,  # UseAutoSelect
             )
         else:
             feature_manager = adapter.currentModel.FeatureManager
@@ -421,7 +445,19 @@ def _create_revolve_impl(
                 True,
             )
 
-        # IModelDoc2.FeatureRevolve2 returns None (void) on SW 2025
+        # Verify real material appeared rather than trusting the COM return
+        # value, which can be a Feature object (or void) for a revolve that
+        # produced nothing.
+        volume_after = _model_volume(adapter)
+        if volume_after <= volume_before * 1.001:
+            raise Exception(
+                "Revolve produced no geometry "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                "Check that the sketch contains a closed profile and a "
+                "centerline for the axis, and that the profile does not cross "
+                "the axis."
+            )
+
         if not feature and revolve_sw_major != 33:
             raise Exception("Failed to create revolve feature")
 
@@ -856,6 +892,47 @@ def _create_loft_impl(
         AdapterResult[SolidWorksFeature],
         adapter._handle_com_operation("create_loft", _loft_operation),
     )
+
+
+# swFeatureFilletOptions_e bitmask used for a plain constant-radius fillet
+# (propagate to tangent faces + keep features).  Verified working on SW 2025.
+_FILLET_DEFAULT_OPTIONS = 195
+
+
+def _select_all_edges(adapter: Any) -> int:
+    """Select every edge of every solid body in the active part.
+
+    Enables "round all edges" without the caller having to know SolidWorks
+    edge identifiers such as ``"Edge<1>"`` — there is no API in this adapter
+    to enumerate those names, which previously made ``add_fillet`` unusable.
+
+    Note ``IModelDocExtension::GetBodies2`` returns ``None`` on this build;
+    the ``IPartDoc::GetBodies2`` form is the one that works.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        int: Number of edges successfully added to the selection set.
+    """
+    model = adapter.currentModel
+    bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        bodies = adapter._attempt(
+            lambda: model.Extension.GetBodies2(0, True), default=None
+        )
+    if not isinstance(bodies, (list, tuple)):
+        return 0
+
+    count = 0
+    for body in bodies:
+        edges = adapter._attempt(lambda b=body: b.GetEdges(), default=None)
+        if not isinstance(edges, (list, tuple)):
+            continue
+        for edge in edges:
+            if adapter._attempt(lambda e=edge: e.Select2(True, 0), default=False):
+                count += 1
+    return count
 
 
 def _model_volume(adapter: Any) -> float:
@@ -1357,78 +1434,83 @@ def _add_fillet_impl(
             SolidWorksFeature: Populated feature descriptor.
 
         Raises:
-            Exception: If any edge selection fails or the feature is ``None``.
+            Exception: If no edge could be selected or no material changed.
         """
-        # Detect SW major version for FeatureFillet3 parameter count
-        fillet_sw_major = 0
-        if getattr(adapter, "swApp", None):
-            rev = adapter._attempt(
-                lambda: adapter._get_attr_or_call(adapter.swApp, "RevisionNumber"),
-                default="0",
-            )
-            try:
-                fillet_sw_major = int(str(rev).split(".")[0])
-            except (ValueError, IndexError):
-                fillet_sw_major = 0
+        volume_before = _model_volume(adapter)
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
 
-        for edge_name in edge_names:
-            selected = adapter.currentModel.Extension.SelectByID2(
-                edge_name,
-                "EDGE",
-                0,
-                0,
-                0,
-                True,
-                0,
-                None,
-                0,
-            )
-            if not selected:
-                raise Exception(f"Failed to select edge: {edge_name}")
-
-        # SW 2025 (major=33): IModelDoc2.FeatureFillet3 (9 params) verified.
-        # Other versions: IFeatureManager.FeatureFillet3 (16 params, original code).
-        if fillet_sw_major == 33:
-            feature = adapter.currentModel.FeatureFillet3(
-                radius / 1000.0,  # R1 in meters
-                True,  # Propagate
-                0,  # Ftyp
-                0,
-                0,  # VarRadTyp, OverflowType
-                0,
-                None,  # NRadii, Radii
-                False,
-                False,  # UseHelpPoint, UseTangentHoldLine
-            )
+        selected_count = 0
+        if edge_names:
+            for edge_name in edge_names:
+                ok = adapter._attempt(
+                    lambda n=edge_name: adapter.currentModel.Extension.SelectByID2(
+                        n, "EDGE", 0, 0, 0, True, 0, None, 0
+                    ),
+                    default=False,
+                )
+                if ok:
+                    selected_count += 1
+            if not selected_count:
+                raise Exception(
+                    f"Failed to select any of the named edges: {edge_names}. "
+                    "Omit edge_names to fillet every edge of the solid instead."
+                )
         else:
-            feature_manager = adapter.currentModel.FeatureManager
-            feature = feature_manager.FeatureFillet3(
-                radius / 1000.0,
-                0,
-                0,
-                0,
-                0,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                0,
-                False,
-            )
+            selected_count = _select_all_edges(adapter)
+            if not selected_count:
+                raise Exception(
+                    "No edges found to fillet - the model has no solid bodies."
+                )
 
-        # IModelDoc2.FeatureFillet3 returns int on SW 2025, not IFeature
-        if not feature and fillet_sw_major != 33:
-            raise Exception("Failed to create fillet")
+        # IFeatureManager::FeatureFillet3 with its full 14-argument signature,
+        # read from the live gen_py type library.  The previous code called a
+        # 9-argument IModelDoc2 variant (and a 15-argument FeatureManager one),
+        # neither of which matches this build, so fillets always failed.
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.FeatureFillet3(
+            _FILLET_DEFAULT_OPTIONS,  # Options bitmask
+            radius / 1000.0,  # R1 (m)
+            0.0,  # R2
+            0.0,  # Rho
+            0,  # Ftyp (constant radius)
+            0,  # OverflowType
+            0,  # ConicRhoType
+            None,  # Radii
+            None,  # Dist2Arr
+            None,  # RhoArr
+            None,  # SetBackDistances
+            None,  # PointRadiusArray
+            None,  # PointDist2Array
+            None,  # PointRhoArray
+        )
+
+        # Verify the solid actually changed: SolidWorks can return a Feature
+        # for a fillet that rounded nothing.
+        volume_after = _model_volume(adapter)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            raise Exception(
+                "Fillet produced no change in the model "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                f"Radius {radius}mm may be too large for the selected edges."
+            )
 
         return SolidWorksFeature(
-            name=feature.Name,
+            name=str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="Fillet",
+                )
+                if feature
+                else "Fillet"
+            ),
             type="Fillet",
-            id=adapter._get_feature_id(feature),
-            parameters={"radius": radius, "edges": edge_names},
+            id=adapter._get_feature_id(feature) if feature else "fillet",
+            parameters={
+                "radius": radius,
+                "edges": edge_names or f"all ({selected_count} edges)",
+            },
             properties={"created": datetime.now().isoformat()},
         )
 
