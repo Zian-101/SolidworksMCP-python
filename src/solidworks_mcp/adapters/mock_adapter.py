@@ -1686,6 +1686,81 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
+        """Mock reference axis creation.
+
+        Args:
+            reference (str): Axis direction. Defaults to ``"z"``.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Axis payload.
+        """
+        key = str(reference or "").strip().lower().lstrip("+-")
+        if key not in ("x", "y", "z"):
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=f"Unknown axis reference '{reference}'. Use one of: x, y, z.",
+            )
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Axis{random.randint(1, 99)}",
+                "reference": key,
+                "planes": ["Front Plane", "Top Plane"],
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
+    async def pattern_circular(
+        self,
+        features: list[str],
+        axis: str = "z",
+        count: int = 4,
+        angle: float = 360.0,
+        equal_spacing: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock circular feature pattern.
+
+        Args:
+            features (list[str]): Feature names to repeat.
+            axis (str): Axis feature name, or ``"x"``/``"y"``/``"z"``.
+            count (int): Instances including the original.
+            angle (float): Degrees of sweep.
+            equal_spacing (bool): Distribute instances evenly across ``angle``.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Pattern payload.
+        """
+        if not features:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="pattern_circular requires at least one feature name",
+            )
+        if count < 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="pattern_circular requires count >= 2",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"CirPattern{random.randint(1, 99)}",
+                "features": list(features),
+                "axis": axis,
+                "axis_created": axis.strip().lower().lstrip("+-") in ("x", "y", "z"),
+                "count": count,
+                "angle": angle,
+                "equal_spacing": equal_spacing,
+            },
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
     async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
         """Mock bounding box measurement.
 

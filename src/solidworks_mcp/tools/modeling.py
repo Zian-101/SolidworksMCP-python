@@ -506,6 +506,63 @@ class PatternLinearInput(CompatInput):
             raise ValueError("count must be >= 2 (it includes the original)")
 
 
+class PatternCircularInput(CompatInput):
+    """Input schema for repeating features around an axis.
+
+    Attributes:
+        features (list[str]): Feature names to repeat.
+        axis (str): Axis feature name, or 'x'/'y'/'z'.
+        count (int): Instances including the original.
+        angle (float): Degrees of sweep.
+        equal_spacing (bool): Distribute instances evenly across the angle.
+    """
+
+    features: list[str] = Field(
+        description="Feature names to repeat, e.g. ['Cut-Extrude1']"
+    )
+    axis: str = Field(
+        default="z",
+        description=(
+            "Rotation axis: an existing axis feature name (e.g. 'Axis1'), or "
+            "'x'/'y'/'z' to use or create a reference axis through the origin"
+        ),
+    )
+    count: int = Field(
+        default=4, description="Total instances including the original (>= 2)"
+    )
+    angle: float = Field(
+        default=360.0,
+        description=(
+            "Degrees. With equal_spacing this is the total sweep the instances "
+            "are spread over; otherwise it is the angle between neighbours"
+        ),
+    )
+    equal_spacing: bool = Field(
+        default=True, description="Distribute instances evenly across 'angle'"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.features:
+            raise ValueError("features must contain at least one feature name")
+        if self.count < 2:
+            raise ValueError("count must be >= 2 (it includes the original)")
+        if not self.angle:
+            raise ValueError("angle must be non-zero")
+
+
+class CreateAxisInput(CompatInput):
+    """Input schema for creating a reference axis.
+
+    Attributes:
+        reference (str): Axis direction — 'x', 'y' or 'z'.
+    """
+
+    reference: str = Field(
+        default="z",
+        description="Axis direction through the model origin: 'x', 'y' or 'z'",
+    )
+
+
 class UndoInput(CompatInput):
     """Input schema for undoing recent operations.
 
@@ -1393,6 +1450,109 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in pattern_linear tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def create_axis(input_data: CreateAxisInput | None = None) -> dict[str, Any]:
+        """Create a reference axis through the model origin.
+
+        A fresh part has no axes — only the six default planes — so this is the
+        prerequisite for a circular pattern. The axis is built from the
+        intersection of the two built-in planes that share the requested
+        direction, which places it exactly on the origin without depending on
+        any existing geometry.
+
+        ``pattern_circular`` calls this for you when you pass 'x', 'y' or 'z',
+        so you only need it directly to create an axis up front.
+
+        Args:
+            input_data (CreateAxisInput | None): Axis direction.
+
+        Returns:
+            dict[str, Any]: Status and the new axis's feature name.
+
+        Example:
+            ```python
+            await create_axis({"reference": "z"})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, CreateAxisInput)
+            result = await adapter.create_axis(input_data.reference)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Created axis {data.get('name', '')} along "
+                        f"{input_data.reference}"
+                    ),
+                    "axis": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to create axis: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in create_axis tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def pattern_circular(input_data: PatternCircularInput) -> dict[str, Any]:
+        """Repeat one or more features around an axis (circular pattern).
+
+        Creates a Circular Pattern feature — e.g. turning a single hole into a
+        ring of evenly spaced holes around a bolt circle.
+
+        ``axis`` accepts an existing axis feature name, or 'x'/'y'/'z' to reuse
+        an axis if the part has one and create it otherwise. **The axis must
+        pass through the part** or the instances land outside the body; the
+        tool measures volume before and after and reports an error rather than
+        a false success if nothing changed.
+
+        Args:
+            input_data (PatternCircularInput): Features, axis, count, angle.
+
+        Returns:
+            dict[str, Any]: Status and pattern details.
+
+        Example:
+            ```python
+            # Six holes evenly spaced around the Z axis
+            await pattern_circular({
+                "features": ["Cut-Extrude1"],
+                "axis": "z",
+                "count": 6,
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, PatternCircularInput)
+            result = await adapter.pattern_circular(
+                input_data.features,
+                input_data.axis,
+                input_data.count,
+                input_data.angle,
+                input_data.equal_spacing,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Patterned {len(input_data.features)} feature(s) into "
+                        f"{input_data.count} instances around {input_data.axis}"
+                    ),
+                    "pattern": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to create circular pattern: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in pattern_circular tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

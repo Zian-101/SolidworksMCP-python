@@ -103,6 +103,19 @@ class SolidWorksFeaturesMixin:
             self, features, direction, count, spacing, direction_edge
         )
 
+    async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
+        return _create_axis_impl(self, reference)
+
+    async def pattern_circular(
+        self,
+        features: list[str],
+        axis: str = "z",
+        count: int = 4,
+        angle: float = 360.0,
+        equal_spacing: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _pattern_circular_impl(self, features, axis, count, angle, equal_spacing)
+
     async def get_bounding_box(self) -> AdapterResult[dict[str, Any]]:
         return _get_bounding_box_impl(self)
 
@@ -597,7 +610,7 @@ def _read_member(obj: Any, name: str) -> Any:
 def _profile_feature_names(adapter: Any) -> list[str]:
     """Return sketch (``ProfileFeature``) names in feature-tree order.
 
-    Walks ``FirstFeature`` â†’ ``GetNextFeature`` reading ``GetTypeName2`` and
+    Walks ``FirstFeature`` -> ``GetNextFeature`` reading ``GetTypeName2`` and
     collecting features whose type is ``"ProfileFeature"`` (a 2D/3D sketch).
     Mirrors the tree walk used by :func:`_create_cut_extrude_impl`, but flags
     each feature for ``IFeature`` and reads members through
@@ -810,7 +823,7 @@ def _create_loft_impl(
               two are required.
             - ``guide_curves`` (list[str] | None): Optional guide curve names.
             - ``start_tangent`` / ``end_tangent`` (str | None): ``"normal"``
-              tangency at the start/end profile, anything else / ``None`` â†’
+              tangency at the start/end profile, anything else / ``None`` ->
               no tangency.
             - ``merge_result`` (bool): Merge with existing bodies.
 
@@ -1240,6 +1253,12 @@ def _pattern_linear_impl(
         """Inner COM closure: select direction edge + features, then pattern."""
         volume_before = _model_volume(adapter)
 
+        # What one instance is worth, so the result can be checked against
+        # (count - 1) instances rather than merely "something changed".  A
+        # direction that marches copies off the side of the body still moves
+        # the volume, which a "did it change?" guard reports as success.
+        instance_volume = _feature_volume_contribution(adapter, feature_names)
+
         edges = _body_edges(adapter)
         if not edges:
             raise Exception("No solid body found to pattern along")
@@ -1306,6 +1325,20 @@ def _pattern_linear_impl(
                 f"direction, a smaller spacing, or a lower count."
             )
 
+        # Strong check: the change must account for every requested instance.
+        instances_made: float | None = None
+        if instance_volume:
+            instances_made = 1.0 + abs(volume_after - volume_before) / instance_volume
+            if instances_made < count - 0.05:
+                raise Exception(
+                    f"Pattern produced only ~{instances_made:.1f} of the {count} "
+                    f"requested instances "
+                    f"(volume moved {abs(volume_after - volume_before):.4g}, "
+                    f"expected {(count - 1) * instance_volume:.4g}). "
+                    f"Instances are running off the body - try the opposite "
+                    f"direction, a smaller spacing, or a lower count."
+                )
+
         return {
             "name": str(
                 adapter._attempt(
@@ -1320,11 +1353,462 @@ def _pattern_linear_impl(
             "direction_edge": edge_index,
             "count": int(count),
             "spacing": spacing,
+            "instances_verified": (
+                round(instances_made, 2) if instances_made is not None else None
+            ),
+            "verification": "instance-count" if instance_volume else "volume-changed",
         }
 
     return cast(
         AdapterResult[dict[str, Any]],
         adapter._handle_com_operation("pattern_linear", _pattern_operation),
+    )
+
+
+#: Pairs of built-in planes whose intersection line is the named model axis.
+#: Front = XY, Top = XZ, Right = YZ, so each axis is the line shared by the two
+#: planes that both contain it.
+_AXIS_PLANE_PAIRS: dict[str, tuple[str, str]] = {
+    "x": ("Front Plane", "Top Plane"),
+    "y": ("Front Plane", "Right Plane"),
+    "z": ("Top Plane", "Right Plane"),
+}
+
+
+def _axis_features(adapter: Any) -> list[tuple[str, tuple[float, float, float] | None]]:
+    """Return every reference axis in the tree with its unit direction vector.
+
+    Same guarded ``FirstFeature`` -> ``GetNextFeature`` walk as
+    :func:`_profile_feature_names`, filtering on the ``"RefAxis"`` type name.
+    Members are read via :func:`_read_member` because pywin32 late binding may
+    resolve them as either bound methods or values.
+
+    The direction comes from ``IRefAxis::GetRefAxisParams()``, which returns
+    two points on the line as ``[x1, y1, z1, x2, y2, z2]``.  Direction is what
+    makes an axis reusable or not, so an axis whose parameters cannot be read
+    is returned with ``None`` rather than silently assumed to fit.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+
+    Returns:
+        list[tuple[str, tuple[float, float, float] | None]]: ``(name,
+        direction)`` pairs in tree order.  Empty when the tree holds no axes
+        or is inaccessible.
+    """
+    axes: list[tuple[str, tuple[float, float, float] | None]] = []
+    try:
+        _flag_feature_methods(adapter.currentModel, "IModelDoc2")
+        feat = _read_member(adapter.currentModel, "FirstFeature")
+        for _ in range(5000):
+            if not feat:
+                break
+            _flag_feature_methods(feat, "IFeature")
+            try:
+                if _read_member(feat, "GetTypeName2") == "RefAxis":
+                    name = str(_read_member(feat, "Name"))
+                    axes.append((name, _axis_direction(adapter, feat)))
+            except Exception:
+                pass
+            try:
+                feat = _read_member(feat, "GetNextFeature")
+            except Exception:
+                break
+    except Exception:
+        pass
+    return axes
+
+
+def _axis_direction(
+    adapter: Any, feature: Any
+) -> tuple[float, float, float] | None:
+    """Read a reference axis's unit direction vector.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        feature: The ``RefAxis`` feature.
+
+    Returns:
+        tuple[float, float, float] | None: Unit direction, or ``None`` when the
+        axis parameters cannot be read.
+    """
+    axis = adapter._attempt(
+        lambda: adapter._get_attr_or_call(feature, "GetSpecificFeature2"), default=None
+    )
+    if axis is None:
+        return None
+
+    _flag_feature_methods(axis, "IRefAxis")
+    params = adapter._attempt(lambda: _read_member(axis, "GetRefAxisParams"), default=None)
+    if not isinstance(params, (list, tuple)) or len(params) < 6:
+        return None
+
+    vector = tuple(float(params[i + 3]) - float(params[i]) for i in range(3))
+    length = sum(component * component for component in vector) ** 0.5
+    if length < 1e-12:
+        return None
+    return cast(
+        "tuple[float, float, float]", tuple(c / length for c in vector)
+    )
+
+
+def _feature_volume_contribution(adapter: Any, names: list[str]) -> float:
+    """Measure how much volume the given features are worth, in m³.
+
+    Suppresses them, re-reads the volume, then unsuppresses — so the model ends
+    exactly where it started.  This is what turns a pattern check from "did
+    anything change?" into "did every requested instance appear?".
+
+    Best-effort by design: any failure returns ``0.0`` and the caller falls
+    back to the weaker guard rather than blocking a legitimate operation.  The
+    unsuppress runs even when the measurement fails, so a half-applied
+    suppression cannot be left behind.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        names: Feature names whose combined contribution to measure.
+
+    Returns:
+        float: Absolute volume difference in m³, or ``0.0`` when unavailable.
+    """
+    if not names:
+        return 0.0
+
+    suppressed: list[str] = []
+    try:
+        with_features = _model_volume(adapter, rebuild=True)
+        if not with_features:
+            return 0.0
+
+        for name in names:
+            adapter._attempt(
+                lambda: adapter.currentModel.ClearSelection2(True), default=None
+            )
+            if not _select_named_feature(adapter, name, 0, append=False):
+                return 0.0
+            if not adapter._attempt(
+                lambda: adapter.currentModel.EditSuppress2(), default=False
+            ):
+                return 0.0
+            suppressed.append(name)
+
+        without_features = _model_volume(adapter, rebuild=True)
+        return abs(with_features - without_features)
+    except Exception:
+        return 0.0
+    finally:
+        for name in suppressed:
+            adapter._attempt(
+                lambda: adapter.currentModel.ClearSelection2(True), default=None
+            )
+            if _select_named_feature(adapter, name, 0, append=False):
+                adapter._attempt(
+                    lambda: adapter.currentModel.EditUnsuppress2(), default=False
+                )
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+
+def _find_axis_along(adapter: Any, key: str) -> str | None:
+    """Return the name of an existing axis running along ``key``, if any.
+
+    An axis has no sign — a line along ``-z`` is the same line as ``+z`` — so
+    the match is on absolute alignment.  Reusing *any* axis regardless of
+    direction would silently pattern around the wrong one.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        key: ``"x"``, ``"y"`` or ``"z"``.
+
+    Returns:
+        str | None: Matching axis feature name, or ``None``.
+    """
+    index = {"x": 0, "y": 1, "z": 2}.get(key)
+    if index is None:
+        return None
+
+    for name, direction in _axis_features(adapter):
+        if direction is None:
+            continue
+        if abs(direction[index]) > 0.999:
+            return name
+    return None
+
+
+def _create_axis_impl(adapter: Any, reference: str) -> AdapterResult[dict[str, Any]]:
+    """Create a reference axis along one of the model's principal directions.
+
+    A circular pattern needs a rotation axis, and a fresh part has none — the
+    six default planes are all SolidWorks provides.  This builds one from the
+    intersection of the two built-in planes that share the requested direction
+    (see :data:`_AXIS_PLANE_PAIRS`), which puts the axis exactly on the model
+    origin without depending on any existing geometry.
+
+    Wraps ``IModelDoc2::InsertAxis2(AutoSize)`` with both planes preselected
+    under mark 0.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        reference: ``"x"``, ``"y"`` or ``"z"`` (case-insensitive; a leading
+            sign is ignored — an axis has no direction, only a line).
+
+    Returns:
+        AdapterResult[dict[str, Any]]: The new axis's feature name and the
+        planes it was derived from.  ``ERROR`` for an unknown reference or when
+        no new axis appears in the tree.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        await adapter.create_axis("z")   # vertical axis through the origin
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    key = str(reference or "").strip().lower().lstrip("+-")
+    if key not in _AXIS_PLANE_PAIRS:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error=(
+                f"Unknown axis reference '{reference}'. "
+                f"Use one of: {', '.join(sorted(_AXIS_PLANE_PAIRS))}."
+            ),
+        )
+
+    plane_a, plane_b = _AXIS_PLANE_PAIRS[key]
+
+    def _axis_operation() -> dict[str, Any]:
+        """Inner COM closure: select both planes, then insert the axis."""
+        before = {name for name, _ in _axis_features(adapter)}
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        for index, plane in enumerate((plane_a, plane_b)):
+            append = index > 0
+            selected = _select_named_feature(adapter, plane, 0, append=append)
+            if not selected:
+                selected = bool(
+                    adapter._attempt(
+                        lambda p=plane, a=append: (
+                            adapter.currentModel.Extension.SelectByID2(
+                                p, "PLANE", 0.0, 0.0, 0.0, a, 0, None, 0
+                            )
+                        ),
+                        default=False,
+                    )
+                )
+            if not selected:
+                raise Exception(f"Failed to select '{plane}' for the axis")
+
+        adapter._attempt(lambda: adapter.currentModel.InsertAxis2(True), default=None)
+
+        # InsertAxis2 returns nothing useful, so confirm against the tree.
+        after = [name for name, _ in _axis_features(adapter)]
+        new_axes = [n for n in after if n not in before]
+        if not new_axes:
+            raise Exception(
+                f"No reference axis was created from {plane_a} + {plane_b}. "
+                "InsertAxis2 reported nothing and the feature tree is unchanged."
+            )
+
+        return {
+            "name": new_axes[-1],
+            "reference": key,
+            "planes": [plane_a, plane_b],
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("create_axis", _axis_operation),
+    )
+
+
+def _pattern_circular_impl(
+    adapter: Any,
+    features: list[str],
+    axis: str,
+    count: int,
+    angle: float,
+    equal_spacing: bool,
+) -> AdapterResult[dict[str, Any]]:
+    """Repeat one or more features around an axis.
+
+    Wraps ``IFeatureManager::FeatureCircularPattern4(Number, Spacing,
+    FlipDirection, DName, GeometryPattern, EqualSpacing, VaryInstance)``.
+    Preselection marks match the linear pattern: **axis = mark 1**, each
+    **feature to repeat = mark 4**.
+
+    ``axis`` may name an existing axis feature (e.g. ``"Axis1"``) or one of
+    ``"x"``/``"y"``/``"z"``.  For the latter an axis is reused if one already
+    exists for that direction and created via :func:`_create_axis_impl`
+    otherwise — a fresh part has no axes at all, so without this the tool would
+    be unusable on the exact models people want to pattern.
+
+    With ``equal_spacing`` (the default) ``angle`` is the **total** sweep the
+    instances are distributed over; otherwise it is the angle **between**
+    adjacent instances.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        features: Names of features to repeat, e.g. ``["Cut-Extrude1"]``.
+        axis: Axis feature name, or ``"x"``/``"y"``/``"z"``.
+        count: Total instances **including** the original (>= 2).
+        angle: Degrees — total sweep, or per-step when ``equal_spacing`` is off.
+        equal_spacing: Distribute instances evenly across ``angle``.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Pattern details on success; ``ERROR``
+        when the axis cannot be resolved, selection fails, or the model does
+        not change.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # Six holes evenly spaced around the Z axis
+        await adapter.pattern_circular(["Cut-Extrude1"], "z", 6)
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    feature_names = [f for f in (features or []) if f]
+    if not feature_names:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_circular requires at least one feature name",
+        )
+    if count < 2:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_circular requires count >= 2 (count includes the original)",
+        )
+    if not angle:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_circular requires a non-zero angle",
+        )
+
+    axis_request = str(axis or "z").strip()
+    axis_key = axis_request.lower().lstrip("+-")
+
+    def _circular_operation() -> dict[str, Any]:
+        """Inner COM closure: resolve/select the axis and features, then pattern."""
+        import math
+
+        volume_before = _model_volume(adapter)
+
+        axis_name = axis_request
+        created_axis = False
+        if axis_key in _AXIS_PLANE_PAIRS:
+            # Reuse only an axis that actually runs along the requested
+            # direction -- taking any existing axis would silently pattern
+            # around the wrong one.
+            existing = _find_axis_along(adapter, axis_key)
+            if existing:
+                axis_name = existing
+            else:
+                result = _create_axis_impl(adapter, axis_key)
+                if not result.is_success or not result.data:
+                    raise Exception(
+                        f"Could not create a '{axis_key}' axis to pattern around: "
+                        f"{result.error or 'unknown error'}"
+                    )
+                axis_name = str(result.data["name"])
+                created_axis = True
+
+        # Measure what ONE instance is worth, so the result can be checked
+        # against (count - 1) instances instead of merely "something changed".
+        # A rotation axis that lies *in* the plane of the geometry produces two
+        # distinct positions and coincident copies for the rest -- the volume
+        # moves, so a "did it change?" guard reports a confident success for a
+        # part that is plainly wrong.  Done before patterning so the model is
+        # already back in its original state by the time the pattern is built.
+        instance_volume = _feature_volume_contribution(adapter, feature_names)
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        if not _select_named_feature(adapter, axis_name, 1, append=False):
+            raise Exception(
+                f"Failed to select rotation axis '{axis_name}'. "
+                "Pass an existing axis feature name, or 'x'/'y'/'z' to have "
+                "one created."
+            )
+
+        for name in feature_names:
+            if not _select_named_feature(adapter, name, 4, append=True):
+                raise Exception(f"Failed to select feature to pattern: {name}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.FeatureCircularPattern4(
+            int(count),  # Number
+            math.radians(float(angle)),  # Spacing (radians)
+            False,  # FlipDirection
+            "",  # DName
+            False,  # GeometryPattern
+            bool(equal_spacing),  # EqualSpacing
+            False,  # VaryInstance
+        )
+
+        volume_after = _model_volume(adapter)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            # Re-measure after a rebuild before reporting failure.
+            volume_after = _model_volume(adapter, rebuild=True)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            raise Exception(
+                "Circular pattern produced no new geometry "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                "The instances may land on top of the original or outside the "
+                "body - check that the axis actually passes through the part."
+            )
+
+        # Strong check: the change must account for every requested instance.
+        instances_made: float | None = None
+        if instance_volume:
+            instances_made = 1.0 + abs(volume_after - volume_before) / instance_volume
+            if instances_made < count - 0.05:
+                raise Exception(
+                    f"Circular pattern produced only ~{instances_made:.1f} of the "
+                    f"{count} requested instances "
+                    f"(volume moved {abs(volume_after - volume_before):.4g}, "
+                    f"expected {(count - 1) * instance_volume:.4g}). "
+                    f"The most common cause is a rotation axis that lies in the "
+                    f"plane of the geometry instead of perpendicular to it: "
+                    f"copies then coincide instead of spreading around. Check "
+                    f"that '{axis_name}' is normal to the face the feature sits on."
+                )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="CirPattern",
+                )
+                if feature
+                else "CirPattern"
+            ),
+            "features": feature_names,
+            "axis": axis_name,
+            "axis_created": created_axis,
+            "count": int(count),
+            "angle": float(angle),
+            "equal_spacing": bool(equal_spacing),
+            "instances_verified": (
+                round(instances_made, 2) if instances_made is not None else None
+            ),
+            "verification": "instance-count" if instance_volume else "volume-changed",
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("pattern_circular", _circular_operation),
     )
 
 
@@ -1457,9 +1941,9 @@ def _create_cut_extrude_impl(
 
     Three COM API variants are attempted in order of preference:
 
-    1. ``FeatureCut4`` Î“Ã‡Ã¶ most modern (SolidWorks 2015+).
-    2. ``FeatureCut3`` modern signature Î“Ã‡Ã¶ SolidWorks 2010Î“Ã‡Ã´2014.
-    3. ``FeatureCut3`` legacy argument order Î“Ã‡Ã¶ older installs.
+    1. ``FeatureCut4`` -- most modern (SolidWorks 2015+).
+    2. ``FeatureCut3`` modern signature -- SolidWorks 2010-2014.
+    3. ``FeatureCut3`` legacy argument order -- older installs.
 
     All depth values are in millimetres and converted to metres internally.
 
@@ -2251,9 +2735,9 @@ def _create_reference_plane_impl(
 
     Constraint selection:
 
-    * ``offset`` non-zero â†’ ``swRefPlaneReferenceConstraint_Distance`` (8)
-    * ``angle`` non-zero  â†’ ``swRefPlaneReferenceConstraint_Angle`` (16)
-    * ``flip`` â†’ OR-ed with ``swRefPlaneReferenceConstraint_OptionFlip`` (256)
+    * ``offset`` non-zero -> ``swRefPlaneReferenceConstraint_Distance`` (8)
+    * ``angle`` non-zero  -> ``swRefPlaneReferenceConstraint_Angle`` (16)
+    * ``flip`` -> OR-ed with ``swRefPlaneReferenceConstraint_OptionFlip`` (256)
 
     This removes the long-standing gap where sketches could only be placed on
     the six built-in planes, forcing offset planes to be created by hand in the

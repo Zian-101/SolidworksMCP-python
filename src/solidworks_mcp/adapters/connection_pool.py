@@ -695,6 +695,28 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             ),
         )
 
+    async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
+        """Reference axis creation using pool."""
+        return await self._execute_with_pool(
+            "create_axis", lambda adapter: adapter.create_axis(reference)
+        )
+
+    async def pattern_circular(
+        self,
+        features: list[str],
+        axis: str = "z",
+        count: int = 4,
+        angle: float = 360.0,
+        equal_spacing: bool = True,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Circular feature pattern using pool."""
+        return await self._execute_with_pool(
+            "pattern_circular",
+            lambda adapter: adapter.pattern_circular(
+                features, axis, count, angle, equal_spacing
+            ),
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:

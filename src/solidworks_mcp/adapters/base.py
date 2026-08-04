@@ -1104,6 +1104,45 @@ class SolidWorksAdapter(ABC):
             error="pattern_linear is not implemented by this adapter",
         )
 
+    async def create_axis(self, reference: str = "z") -> "AdapterResult[Any]":
+        """Create a reference axis along a principal model direction.
+
+        Args:
+            reference (str): ``"x"``, ``"y"`` or ``"z"``. Defaults to ``"z"``.
+
+        Returns:
+            AdapterResult: The new axis's feature name, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_axis is not implemented by this adapter",
+        )
+
+    async def pattern_circular(
+        self,
+        features: list[str],
+        axis: str = "z",
+        count: int = 4,
+        angle: float = 360.0,
+        equal_spacing: bool = True,
+    ) -> "AdapterResult[Any]":
+        """Repeat features around an axis.
+
+        Args:
+            features (list[str]): Names of features to repeat.
+            axis (str): Axis feature name, or ``"x"``/``"y"``/``"z"``.
+            count (int): Total instances including the original.
+            angle (float): Degrees of sweep.
+            equal_spacing (bool): Distribute instances evenly across ``angle``.
+
+        Returns:
+            AdapterResult: Pattern details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_circular is not implemented by this adapter",
+        )
+
     async def get_bounding_box(self) -> "AdapterResult[Any]":
         """Measure the axis-aligned bounding box of the model's solid bodies.
 
