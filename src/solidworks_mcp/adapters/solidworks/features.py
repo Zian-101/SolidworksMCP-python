@@ -614,6 +614,29 @@ def _flag_feature_methods(obj: Any, interface: str) -> None:
         pass
 
 
+def _flag_feature_members(obj: Any, *names: str) -> None:
+    """Flag only the named members on ``obj``.
+
+    Cheaper than :func:`_flag_feature_methods` inside a loop: flagging a whole
+    interface costs a fixed price per object, and the flag cache is keyed by
+    ``id(obj)``, so a walk over fresh dispatches never hits it.
+
+    Args:
+        obj: The COM object (or test double) to flag.
+        *names: Member names about to be read.
+    """
+    try:
+        from solidworks_mcp.adapters import sw_type_info
+
+        sw_type_info.flag_members(obj, *names)
+    except Exception:
+        pass
+
+
+#: Members read while walking the feature tree.
+_TREE_WALK_MEMBERS = ("GetTypeName2", "GetNextFeature", "Name", "GetSpecificFeature2")
+
+
 def _read_member(obj: Any, name: str) -> Any:
     """Read a COM member that pywin32 may expose as a property *or* a method.
 
@@ -667,7 +690,7 @@ def _profile_feature_names(adapter: Any) -> list[str]:
         for _ in range(5000):
             if not feat:
                 break
-            _flag_feature_methods(feat, "IFeature")
+            _flag_feature_members(feat, *_TREE_WALK_MEMBERS)
             try:
                 if _read_member(feat, "GetTypeName2") == "ProfileFeature":
                     names.append(str(_read_member(feat, "Name")))
@@ -1066,7 +1089,7 @@ def _component_boxes(adapter: Any, model: Any) -> list[Any]:
         if wrapped is None:
             continue
         adapter._attempt(
-            lambda w=wrapped: sw_type_info.flag_methods(w, "IComponent2"), default=None
+            lambda w=wrapped: sw_type_info.flag_members(w, "GetBox"), default=None
         )
         box = adapter._attempt(lambda w=wrapped: w.GetBox(False, False), default=None)
         if isinstance(box, (list, tuple)) and len(box) >= 6:
@@ -1904,8 +1927,14 @@ def _edge_directions(adapter: Any) -> list[tuple[int, tuple[float, float, float]
 
     results: list[tuple[int, tuple[float, float, float]]] = []
     for index, edge in enumerate(_body_edges(adapter)):
+        # Only the members read below. Flagging the whole IEdge interface costs
+        # a fixed price per edge and the flag cache is keyed by id(obj), so on a
+        # body with many edges it dominates.
         adapter._attempt(
-            lambda e=edge: sw_type_info.flag_methods(e, "IEdge"), default=0
+            lambda e=edge: sw_type_info.flag_members(
+                e, "GetCurveParams2", "GetCurveParams", "Select2"
+            ),
+            default=0,
         )
         params: Any = None
         for method in ("GetCurveParams2", "GetCurveParams"):
@@ -2167,7 +2196,7 @@ def _axis_features(adapter: Any) -> list[tuple[str, tuple[float, float, float] |
         for _ in range(5000):
             if not feat:
                 break
-            _flag_feature_methods(feat, "IFeature")
+            _flag_feature_members(feat, *_TREE_WALK_MEMBERS)
             try:
                 if _read_member(feat, "GetTypeName2") == "RefAxis":
                     name = str(_read_member(feat, "Name"))
