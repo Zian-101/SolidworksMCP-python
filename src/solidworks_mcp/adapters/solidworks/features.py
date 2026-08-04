@@ -1,4 +1,4 @@
-﻿"""Feature-domain mixin for PyWin32 SolidWorks operations."""
+"""Feature-domain mixin for PyWin32 SolidWorks operations."""
 
 from __future__ import annotations
 
