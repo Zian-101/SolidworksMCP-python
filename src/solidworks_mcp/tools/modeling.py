@@ -701,6 +701,28 @@ class SetMaterialInput(CompatInput):
             raise ValueError("name must not be empty")
 
 
+class InsertComponentInput(CompatInput):
+    """Input schema for inserting a component into an assembly.
+
+    Attributes:
+        file_path (str): Path to the part or sub-assembly.
+        x (float): X position in millimetres.
+        y (float): Y position in millimetres.
+        z (float): Z position in millimetres.
+    """
+
+    file_path: str = Field(
+        description="Absolute path to the .sldprt or .sldasm to insert"
+    )
+    x: float = Field(default=0.0, description="X position in millimetres")
+    y: float = Field(default=0.0, description="Y position in millimetres")
+    z: float = Field(default=0.0, description="Z position in millimetres")
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.file_path or not self.file_path.strip():
+            raise ValueError("file_path must not be empty")
+
+
 class CreateAxisInput(CompatInput):
     """Input schema for creating a reference axis.
 
@@ -740,9 +762,9 @@ class CreateAssemblyInput(CompatInput):
     components: list[str] = Field(
         default_factory=list,
         description=(
-            "Components to insert. NOT SUPPORTED: the assembly is created but "
-            "no component is inserted, and the response says so. Insert them "
-            "in the SolidWorks UI or via generate_vba_assembly_insert"
+            "Paths of parts to insert at the origin after the assembly is "
+            "created. Each must contain solid geometry. Use insert_component "
+            "to place them at specific positions"
         ),
     )
 
@@ -971,20 +993,33 @@ async def register_modeling_tools(
                     },
                     "execution_time": result.execution_time,
                 }
-                if input_data.components:
-                    # The assembly really is created, but nothing is inserted.
-                    # This used to echo the requested components back inside a
-                    # "success" payload, which read as though they had been
-                    # added — an isometric render of the result was an empty
-                    # scene. Say so instead.
-                    payload["warning"] = (
-                        f"{len(input_data.components)} component(s) were "
-                        "requested but NONE were inserted: component insertion "
-                        "is not available through this adapter. Insert them in "
-                        "the SolidWorks UI, or generate a macro with "
-                        "generate_vba_assembly_insert."
+                # Insert whatever the caller asked for, rather than echoing the
+                # list back as though it had been added.
+                inserted: list[str] = []
+                failures: list[str] = []
+                for component_path in input_data.components:
+                    insert_result = await adapter.insert_component(
+                        component_path, 0.0, 0.0, 0.0
                     )
-                    payload["components_requested"] = input_data.components
+                    if insert_result.is_success:
+                        data = (
+                            insert_result.data
+                            if isinstance(insert_result.data, dict)
+                            else {}
+                        )
+                        inserted.append(str(data.get("component", component_path)))
+                    else:
+                        failures.append(f"{component_path}: {insert_result.error}")
+
+                payload["assembly"]["components_inserted"] = len(inserted)
+                if inserted:
+                    payload["assembly"]["components"] = inserted
+                if failures:
+                    payload["warning"] = (
+                        f"{len(failures)} of {len(input_data.components)} "
+                        f"component(s) could not be inserted: "
+                        + "; ".join(failures)
+                    )
                 return payload
             else:
                 return {
@@ -1906,6 +1941,76 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in set_material tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def insert_component(input_data: InsertComponentInput) -> dict[str, Any]:
+        """Insert a part or sub-assembly into the active assembly.
+
+        Call ``create_assembly`` first. Position is in millimetres from the assembly
+        origin.
+
+        **The component file must contain solid geometry** — SolidWorks silently
+        refuses to insert an empty part, so this tool confirms the component count
+        actually went up rather than trusting the API's return value.
+
+        Args:
+            input_data (InsertComponentInput): File path and position.
+
+        Returns:
+            dict[str, Any]: Status, the component's instance name and counts.
+
+        Example:
+            ```python
+            await create_assembly({"name": "bracket_asm"})
+            await insert_component({"file_path": "C:/parts/plate.sldprt"})
+            await insert_component({"file_path": "C:/parts/plate.sldprt", "x": 100.0})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, InsertComponentInput)
+            result = await adapter.insert_component(
+                input_data.file_path, input_data.x, input_data.y, input_data.z
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Inserted {data.get('component', 'component')}",
+                    "component": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to insert component: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in insert_component tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def list_components() -> dict[str, Any]:
+        """List the top-level components of the active assembly.
+
+        Returns:
+            dict[str, Any]: Status and the component instance names.
+        """
+        try:
+            result = await adapter.list_components()
+            if result.is_success:
+                components = result.data if isinstance(result.data, list) else []
+                return {
+                    "status": "success",
+                    "message": f"{len(components)} component(s) in the assembly",
+                    "components": components,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to list components: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in list_components tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

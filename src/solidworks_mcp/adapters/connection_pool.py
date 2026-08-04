@@ -758,6 +758,21 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             "set_material", lambda adapter: adapter.set_material(name, database)
         )
 
+    async def insert_component(
+        self, file_path: str, x: float = 0.0, y: float = 0.0, z: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Component insertion using pool."""
+        return await self._execute_with_pool(
+            "insert_component",
+            lambda adapter: adapter.insert_component(file_path, x, y, z),
+        )
+
+    async def list_components(self) -> AdapterResult[Any]:
+        """Component listing using pool."""
+        return await self._execute_with_pool(
+            "list_components", lambda adapter: adapter.list_components()
+        )
+
     async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> AdapterResult[Any]:
         """Place a view of a model on the active drawing sheet. (pool)."""
         return await self._execute_with_pool(

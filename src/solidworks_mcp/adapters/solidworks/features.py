@@ -1033,6 +1033,63 @@ def _body_faces(adapter: Any) -> list[Any]:
     return list(faces) if isinstance(faces, (list, tuple)) else []
 
 
+def _component_boxes(adapter: Any, model: Any) -> list[Any]:
+    """Return each assembly component's bounding box, in assembly coordinates.
+
+    ``IComponent2::GetBox`` reports the component where it actually sits in the
+    assembly.  Its *bodies* must not be used for this: ``IBody2::GetBodyBox``
+    on a component body returns the box in the **part's own** coordinates, so
+    three copies of one part at different positions all report the same extents
+    — a plausible-looking but wrong answer.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        model: The assembly document.
+
+    Returns:
+        list[Any]: Raw 6-value boxes in metres, empty when not an assembly.
+    """
+    from solidworks_mcp.adapters import sw_type_info
+
+    components = adapter._attempt(
+        lambda: sw_type_info.flagged(model, "IAssemblyDoc").GetComponents(True),
+        default=None,
+    )
+    if not isinstance(components, (list, tuple)):
+        return []
+
+    boxes: list[Any] = []
+    for component in components:
+        wrapped = adapter._attempt(
+            lambda c=component: _dynamic_dispatch(c), default=None
+        )
+        if wrapped is None:
+            continue
+        adapter._attempt(
+            lambda w=wrapped: sw_type_info.flag_methods(w, "IComponent2"), default=None
+        )
+        box = adapter._attempt(lambda w=wrapped: w.GetBox(False, False), default=None)
+        if isinstance(box, (list, tuple)) and len(box) >= 6:
+            boxes.append(box)
+    return boxes
+
+
+def _dynamic_dispatch(obj: Any) -> Any:
+    """Wrap a raw ``PyIDispatch`` so late binding can resolve its methods.
+
+    Args:
+        obj: The raw dispatch.
+
+    Returns:
+        Any: A late-bound wrapper, or ``None`` when pywin32 is unavailable.
+    """
+    try:
+        import win32com.client.dynamic as dynamic
+    except ImportError:  # pragma: no cover - non-Windows
+        return None
+    return dynamic.Dispatch(obj)
+
+
 def _solid_bodies(adapter: Any) -> list[Any]:
     """Return every solid body in the active part, in a stable order.
 
@@ -2542,29 +2599,37 @@ def _get_bounding_box_impl(adapter: Any) -> AdapterResult[dict[str, Any]]:
 
     def _bbox_operation() -> dict[str, Any]:
         model = adapter.currentModel
-        bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
-        if not isinstance(bodies, (list, tuple)) or not bodies:
-            bodies = adapter._attempt(
-                lambda: model.Extension.GetBodies2(0, True), default=None
-            )
-        if not isinstance(bodies, (list, tuple)) or not bodies:
-            raise Exception("No solid bodies found to measure")
-
         low = [float("inf")] * 3
         high = [float("-inf")] * 3
         measured = 0
-        for body in bodies:
-            box = adapter._attempt(lambda b=body: b.GetBodyBox(), default=None)
+
+        def absorb(box: Any) -> bool:
+            """Fold a 6-value box (in metres) into the running extents."""
+            nonlocal measured
             if not isinstance(box, (list, tuple)) or len(box) < 6:
-                continue
+                return False
             values = [float(v) * 1000.0 for v in box[:6]]
             for axis in range(3):
                 low[axis] = min(low[axis], values[axis], values[axis + 3])
                 high[axis] = max(high[axis], values[axis], values[axis + 3])
             measured += 1
+            return True
+
+        bodies = _solid_bodies(adapter)
+        for body in bodies:
+            absorb(adapter._attempt(lambda b=body: b.GetBodyBox(), default=None))
 
         if not measured:
-            raise Exception("GetBodyBox returned no usable extents")
+            # Assemblies own no bodies of their own: measure each component
+            # where it sits, via IComponent2::GetBox.
+            for box in _component_boxes(adapter, model):
+                absorb(box)
+
+        if not measured:
+            raise Exception(
+                "No solid bodies found to measure (the document may be empty, "
+                "or an assembly whose components are suppressed)"
+            )
 
         return {
             "min": {"x": low[0], "y": low[1], "z": low[2]},

@@ -1260,6 +1260,36 @@ class SolidWorksAdapter(ABC):
             error="set_material is not implemented by this adapter",
         )
 
+    async def insert_component(
+        self, file_path: str, x: float = 0.0, y: float = 0.0, z: float = 0.0
+    ) -> "AdapterResult[Any]":
+        """Insert a part or sub-assembly into the active assembly.
+
+        Args:
+            file_path (str): Path to the component file.
+            x (float): X position in millimetres.
+            y (float): Y position in millimetres.
+            z (float): Z position in millimetres.
+
+        Returns:
+            AdapterResult: Component name and counts, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="insert_component is not implemented by this adapter",
+        )
+
+    async def list_components(self) -> "AdapterResult[Any]":
+        """List the top-level components of the active assembly.
+
+        Returns:
+            AdapterResult: Component names, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="list_components is not implemented by this adapter",
+        )
+
     async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> "AdapterResult[Any]":
         """Place a view of a model on the active drawing sheet.
 

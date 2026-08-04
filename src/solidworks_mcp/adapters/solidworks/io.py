@@ -53,6 +53,56 @@ def _byref_int() -> Any:
     )
 
 
+def _doc_type(adapter: Any) -> int | None:
+    """Return the active document's type: 1 part, 2 assembly, 3 drawing.
+
+    ``GetType`` is one of the members pywin32 late binding may expose as either
+    a bound method or a plain value, so calling it directly returns ``None`` on
+    some documents.  ``_get_attr_or_call`` handles both shapes.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+
+    Returns:
+        int | None: The document type, or ``None`` when it cannot be read.
+    """
+    value = adapter._attempt(
+        lambda: adapter._get_attr_or_call(adapter.currentModel, "GetType"),
+        default=None,
+    )
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _component_names(adapter: Any, assembly: Any) -> list[str]:
+    """Return the names of an assembly's top-level components.
+
+    ``AddComponent*`` can return an object having added nothing, so the
+    component list is the ground truth for whether an insert worked.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        assembly: The assembly document, flagged for ``IAssemblyDoc``.
+
+    Returns:
+        list[str]: Component names, empty when the assembly holds none.
+    """
+    components = adapter._attempt(lambda: assembly.GetComponents(True), default=None)
+    if not isinstance(components, (list, tuple)):
+        return []
+
+    names: list[str] = []
+    for component in components:
+        wrapped = _as_com(adapter, component, "IComponent2")
+        if wrapped is None:
+            names.append("<unnamed>")
+            continue
+        name = adapter._attempt(lambda c=wrapped: c.Name2, default=None)
+        if not name:
+            name = adapter._attempt(lambda c=wrapped: c.GetPathName(), default=None)
+        names.append(str(name) if name else "<unnamed>")
+    return names
+
+
 def _as_com(adapter: Any, obj: Any, interface: str) -> Any:
     """Wrap a raw dispatch and flag its methods for an interface.
 
@@ -522,6 +572,173 @@ class SolidWorksIOMixin:
             adapter._handle_com_operation("create_drawing", _create),
         )
 
+    async def insert_component(
+        self, file_path: str, x: float = 0.0, y: float = 0.0, z: float = 0.0
+    ) -> AdapterResult[dict[str, Any]]:
+        """Insert a part or sub-assembly into the active assembly.
+
+        Wraps ``IAssemblyDoc::AddComponent4(CompName, ConfigName, X, Y, Z)``,
+        falling back to ``AddComponent5``.  Position is in **millimetres**.
+
+        **The component file must contain solid geometry.**  SolidWorks
+        silently refuses to insert an empty part — every overload returns
+        ``None`` and the component count stays put.  That behaviour is what
+        made this look unimplementable until the ``save_file`` bug that was
+        writing empty parts got fixed.
+
+        Success is confirmed by the assembly's component count going up, since
+        ``AddComponent*`` gives no usable failure signal.
+
+        Args:
+            file_path (str): Absolute path to the ``.sldprt`` or ``.sldasm``.
+            x (float): X position in millimetres.
+            y (float): Y position in millimetres.
+            z (float): Z position in millimetres.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Component name and before/after
+            counts.  ``ERROR`` when the active document is not an assembly, the
+            file is missing, or nothing was inserted.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+
+        Example::
+
+            await adapter.insert_component(r"C:\\parts\\bracket.sldprt", 0, 0, 0)
+        """
+        adapter = self._adapter(self)
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+
+        path = os.path.abspath(file_path)
+        if not os.path.exists(path):
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=f"Component file not found: {file_path}",
+            )
+
+        doc_type = _doc_type(adapter)
+        if doc_type != 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    "insert_component requires an assembly document "
+                    f"(active document type is {doc_type!r}, expected 2). "
+                    "Call create_assembly first."
+                ),
+            )
+
+        def _insert() -> dict[str, Any]:
+            assembly = _sw_type_info.flagged(adapter.currentModel, "IAssemblyDoc")
+            before = _component_names(adapter, assembly)
+
+            # The document has to be loaded before it can be inserted, and the
+            # errors/warnings out-parameters must be byref VARIANTs: with
+            # pythoncom.Missing OpenDoc6 returns None and the part stays
+            # unloaded, after which every AddComponent overload does nothing.
+            app = adapter.swApp
+            opened = adapter._attempt(
+                lambda: app.OpenDoc6(
+                    path,
+                    2 if path.lower().endswith(".sldasm") else 1,
+                    1,
+                    "",
+                    _byref_int(),
+                    _byref_int(),
+                ),
+                default=None,
+            )
+            if not opened:
+                raise Exception(
+                    f"Could not load '{file_path}' - OpenDoc6 returned nothing."
+                )
+
+            title = adapter._attempt(
+                lambda: _sw_type_info.flagged(
+                    adapter.currentModel, "IModelDoc2"
+                ).GetTitle(),
+                default=None,
+            )
+            if title:
+                adapter._attempt(
+                    lambda: app.ActivateDoc3(title, False, 0, _byref_int()),
+                    default=None,
+                )
+
+            component = adapter._attempt(
+                lambda: assembly.AddComponent4(
+                    path, "", x / 1000.0, y / 1000.0, z / 1000.0
+                ),
+                default=None,
+            )
+            if component is None:
+                component = adapter._attempt(
+                    lambda: assembly.AddComponent5(
+                        path, 0, "", False, "",
+                        x / 1000.0, y / 1000.0, z / 1000.0,
+                    ),
+                    default=None,
+                )
+
+            adapter._attempt(lambda: assembly.EditRebuild3(), default=None)
+
+            after = _component_names(adapter, assembly)
+            if len(after) <= len(before):
+                raise Exception(
+                    f"Component was not inserted - the assembly still has "
+                    f"{len(after)} component(s). The most common cause is a "
+                    f"part with no solid geometry: SolidWorks refuses those "
+                    f"silently. Check '{file_path}' opens with a body."
+                )
+
+            added = [n for n in after if n not in before]
+            return {
+                "component": added[-1] if added else after[-1],
+                "file_path": path,
+                "position": {"x": x, "y": y, "z": z},
+                "components_before": len(before),
+                "components_after": len(after),
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("insert_component", _insert),
+        )
+
+    async def list_components(self) -> AdapterResult[list[str]]:
+        """List the top-level components of the active assembly.
+
+        Returns:
+            AdapterResult[list[str]]: Component names, or an error when the
+            active document is not an assembly.
+        """
+        adapter = self._adapter(self)
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+        doc_type = _doc_type(adapter)
+        if doc_type != 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    "list_components requires an assembly document "
+                    f"(active document type is {doc_type!r}, expected 2)"
+                ),
+            )
+
+        def _list() -> list[str]:
+            assembly = _sw_type_info.flagged(adapter.currentModel, "IAssemblyDoc")
+            return _component_names(adapter, assembly)
+
+        return cast(
+            AdapterResult[list[str]],
+            adapter._handle_com_operation("list_components", _list),
+        )
+
     def _require_drawing(self) -> AdapterResult[Any] | None:
         """Return an error result unless the active document is a drawing.
 
@@ -534,9 +751,7 @@ class SolidWorksIOMixin:
             return AdapterResult(
                 status=AdapterResultStatus.ERROR, error="No active model"
             )
-        doc_type = adapter._attempt(
-            lambda: adapter.currentModel.GetType(), default=None
-        )
+        doc_type = _doc_type(adapter)
         if doc_type != 3:
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,
@@ -1330,9 +1545,7 @@ class SolidWorksIOMixin:
                 status=AdapterResultStatus.ERROR, error="No active model"
             )
 
-        doc_type = adapter._attempt(
-            lambda: adapter.currentModel.GetType(), default=None
-        )
+        doc_type = _doc_type(adapter)
         if doc_type != 2:
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,
@@ -1432,9 +1645,7 @@ class SolidWorksIOMixin:
                 error="set_material requires a material name",
             )
 
-        doc_type = adapter._attempt(
-            lambda: adapter.currentModel.GetType(), default=None
-        )
+        doc_type = _doc_type(adapter)
         if doc_type != 1:
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,

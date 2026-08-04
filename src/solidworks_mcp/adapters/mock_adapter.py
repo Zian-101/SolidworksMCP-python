@@ -106,6 +106,7 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
         # its sketch-entity registry.
         self._sketch_entity_ids: set[str] = set()
         self._dimensions: dict[str, float] = {}
+        self._components: list[str] = []
         self._operation_count = 0
 
         # Configurable simulation delays (in seconds)
@@ -1900,6 +1901,42 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
                 "database": database or "SOLIDWORKS Materials",
                 "configuration": "Default",
             },
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def insert_component(
+        self, file_path: str, x: float = 0.0, y: float = 0.0, z: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Mock component insertion.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        self._components.append(f"component-{len(self._components) + 1}")
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "component": self._components[-1],
+                "file_path": file_path,
+                "position": {"x": x, "y": y, "z": z},
+                "components_before": len(self._components) - 1,
+                "components_after": len(self._components),
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def list_components(self) -> AdapterResult[Any]:
+        """Mock component listing.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data=list(self._components),
             execution_time=self._delays["model_operation"],
         )
 
