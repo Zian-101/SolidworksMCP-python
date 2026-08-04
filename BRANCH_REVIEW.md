@@ -30,6 +30,7 @@ closes those gaps.
 | `fb4c4a2` | `pattern_linear` with axis-based direction |
 | `59929d5` | Drop redundant rebuilds (~225 ms/op); `get_file_properties` reports the real file |
 | `b9c364c` | Analysis tools measure instead of simulating |
+| `bb4b023` | Circular pattern + reference axis; patterns verify instance count |
 
 ---
 
@@ -54,6 +55,8 @@ rebuilding from scratch
 `mirror_feature` · `create_shell` · `pattern_linear` · `add_polyline`
 (N segments in 1 COM round-trip)
 `get_bounding_box` — overall extents in mm, unioned across solid bodies
+`pattern_circular` · `create_axis` — a fresh part has no axis to rotate about,
+so the axis tool ships with the pattern or the pattern is unusable
 
 ## Infrastructure
 
@@ -67,6 +70,11 @@ assertions unchanged.
 (~112 ms) twice per feature; SolidWorks already reflects a just-created feature
 in its mass properties, so the rebuild is now opt-in and only runs to re-check
 an apparent "nothing changed" before failing. ~225 ms saved per modeling op.
+
+**Pattern verification** — both pattern tools now measure what *one* instance
+is worth (suppress the source feature, re-read volume, unsuppress) and require
+the result to account for `count - 1` of them. The old "did the volume change?"
+guard could not tell 6 instances from 2, and twice only a render caught it.
 
 **Caching** — the analysis tools were in the intelligent router's cacheable
 set. Now that they read live geometry they are excluded, alongside the mass
@@ -99,10 +107,17 @@ invalidation, so caching them serves stale values mid-build.
    from `gen_py`, and the return value is a *count*, so a failure surfaces as
    an error rather than a false "no interference" — but it has only been
    exercised against a part document (where it correctly refuses).
-8. **Untouched:** auto-reconnect on stale COM (deliberately deferred — it
-   touches STA `ComExecutor` threading and the RPC failure mode cannot be
-   forced safely to test); live assembly insert + mate (still VBA-generation
-   only); circular pattern, draft, rib and hole wizard.
+8. **`pattern_circular` needs an axis normal to the geometry.** An axis lying
+   *in* the plane of the feature produces coincident copies. This is now
+   caught and explained rather than reported as success, but it is the easiest
+   way to misuse the tool.
+9. **Pattern verification costs two suppress/unsuppress cycles** (≈1 s) per
+   pattern call. Best-effort: if it fails, the tool falls back to the weaker
+   guard and says so via `verification: "volume-changed"`.
+10. **Untouched:** auto-reconnect on stale COM (deliberately deferred — it
+    touches STA `ComExecutor` threading and the RPC failure mode cannot be
+    forced safely to test); live assembly insert + mate (still VBA-generation
+    only); draft, rib, hole wizard, boolean/body ops.
 
 ---
 
