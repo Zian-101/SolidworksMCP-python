@@ -474,10 +474,24 @@ def _add_polyline_impl(
     if not adapter.currentSketchManager:
         return AdapterResult(status=AdapterResultStatus.ERROR, error="No active sketch")
 
-    pts = [
-        (float(p.get("x", 0.0)), float(p.get("y", 0.0)))
-        for p in (points or [])
-    ]
+    # Accept either {"x": .., "y": ..} or a plain (x, y) pair. The dict-only
+    # form raised "'tuple' object has no attribute 'get'" for callers that
+    # passed coordinate pairs, which is the more natural shape in Python.
+    pts: list[tuple[float, float]] = []
+    for point in points or []:
+        if isinstance(point, dict):
+            pts.append((float(point.get("x", 0.0)), float(point.get("y", 0.0))))
+        elif isinstance(point, (list, tuple)) and len(point) >= 2:
+            pts.append((float(point[0]), float(point[1])))
+        else:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    f"add_polyline points must be {{'x': .., 'y': ..}} dicts or "
+                    f"(x, y) pairs; got {type(point).__name__}"
+                ),
+            )
+
     if len(pts) < 2:
         return AdapterResult(
             status=AdapterResultStatus.ERROR,

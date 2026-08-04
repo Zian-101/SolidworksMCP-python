@@ -58,6 +58,17 @@ def _dynamic_dispatch(arg: Any) -> Any:
     return _dynamic_module.Dispatch(arg)
 
 
+#: The only members the feature-tree walk reads. Flagging just these instead of
+#: the whole IFeature interface is what keeps list_features from costing
+#: seconds on a model with a few dozen features.
+_WALK_MEMBERS = (
+    "Name",
+    "GetTypeName2",
+    "GetNextFeature",
+    "IsSuppressed",
+    "GetID",
+)
+
 #: How many times in a row a stale handle may trigger a reconnect before the
 #: adapter gives up and reports the error. Reset on a successful reconnect.
 _MAX_RECONNECT_ATTEMPTS = 2
@@ -1302,7 +1313,8 @@ class _FeatureSelectionService:
         )
         if feature is not None:
             self._adapter._attempt(
-                lambda f=feature: sw_type_info.flag_methods(f, "IFeature"), default=0
+                lambda f=feature: sw_type_info.flag_members(f, *_WALK_MEMBERS),
+                default=0,
             )
         pos = 0
         guard = 0
@@ -1318,10 +1330,14 @@ class _FeatureSelectionService:
             if next_feature is None:
                 break
             feature = next_feature
-            # Flag each new feature dispatch
+            # Flag each new feature dispatch. Only the members this walk reads:
+            # flagging the whole IFeature interface costs ~27 ms per feature and
+            # the flag cache is keyed by id(obj), so a fresh dispatch per
+            # feature never hits it.
             if feature is not None:
                 self._adapter._attempt(
-                    lambda f=feature: sw_type_info.flag_methods(f, "IFeature"), default=0
+                    lambda f=feature: sw_type_info.flag_members(f, *_WALK_MEMBERS),
+                    default=0,
                 )
 
         if features:
