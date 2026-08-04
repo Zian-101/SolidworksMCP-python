@@ -34,6 +34,34 @@ closes those gaps.
 | `c885a92` | Draft, move/copy body, delete body |
 | `88099d4` | Auto-reconnect on stale COM; `create_assembly` stops overclaiming |
 | `8af1a20` | `set_material`, `scale_model`, `delete_face`; material readback fixed |
+| `17de730` | **Destructive `save_file` bug fixed**; drawing tools made real |
+| `164afee` | Remaining fabricated payloads replaced with real data or honest errors |
+| `4fe975a` | Assemblies: insert, list, measure |
+| `6b6024e` | Assembly mates |
+| `bbc9e8d` | `set_appearance` |
+| `7dbbe56` | Regression tests for honesty + wrapper wiring |
+
+---
+
+## The one to read first: `save_file` was destroying geometry
+
+Saving a document **to its own path** took the Save-As branch, which closed the
+document at the target path, deleted the file, then called `SaveAs3` on the
+now-closed document. The result was a valid-looking part containing no solid
+body.
+
+Any "build a part, save it, save it again" sequence silently produced an empty
+model. This is why parts reopened with zero bodies and zero volume — and it
+poisoned several conclusions earlier in this branch, most notably the verdict
+that assembly component insertion was unimplementable. SolidWorks was refusing
+to insert the empty parts it was being handed.
+
+Fixed: saving over the document's own path is a plain `Save`; only a *different*
+document holding the target path is closed; the pre-emptive `os.remove` is gone,
+so a failed Save-As no longer destroys the previous file too.
+
+Verified: an 80×40×10 block reports 32000 mm³, survives save and reopen, and
+still reports 32000 mm³.
 
 ---
 
@@ -64,6 +92,10 @@ so the axis tool ships with the pattern or the pattern is unusable
 `add_draft` · `move_body` · `delete_body` — the first body-level edits
 `set_material` · `scale_model` · `delete_face` — material makes mass properties
 mean something instead of defaulting to 1000 kg/m³
+`insert_component` · `list_components` · `add_mate` — **assemblies work**
+`add_drawing_view` · `create_standard_views` · `add_drawing_note` ·
+`insert_model_dimensions` · `list_drawing_views` — **drawings work**
+`set_appearance` — display colour and transparency
 
 ## Infrastructure
 
@@ -158,11 +190,35 @@ invalidation, so caching them serves stale values mid-build.
       arguments without complaint and produces no geometry; the
       `IFeatureManager` one wants a tenth argument and still produces none.
       A bad sketch setup cannot be ruled out here.
-13. **A pattern worth noting:** feature-creation calls on `IFeatureManager`
-    work (extrude, cut, revolve, fillet, shell, patterns, draft, scale,
-    move/delete body). The *direct-editing* and assembly APIs — combine, move
-    face, component insert — consistently return nothing on this build.
-14. **Untouched:** hole wizard, split body, appearance, live mating.
+13. **`set_appearance` is verified more weakly than everything else here.** The
+    values are confirmed by reading them back from SolidWorks, but the change
+    was never *visually* confirmed — `export_image` was unreliable during that
+    session, rendering an empty sheet for a part that demonstrably has
+    geometry. A SolidWorks appearance applied on top can also override these
+    values in the viewport.
+14. **Still not working:** boolean combine (`InsertCombineFeature`), direct
+    face offset (`InsertMoveFace`), rib (`InsertRib`/`InsertRib2`). All three
+    were retried on a healthy session with real geometry after the `save_file`
+    fix and still return nothing.
+15. **Untouched:** hole wizard, split body.
+
+---
+
+## The correction worth learning from
+
+An earlier commit on this branch declared assembly component insertion
+unimplementable after trying `AddComponent4`, `AddComponent5` across three
+config options, `AddComponents3` and `AddComponent` — every one returning
+`None`.
+
+That verdict was wrong. SolidWorks silently refuses to insert a part with **no
+solid geometry**, and the parts being fed to it were empty because of the
+`save_file` bug. The first retry after that fix inserted a component
+immediately.
+
+The lesson is not "try harder". It is that a dead-looking API is evidence about
+*the whole system*, not just the API — and when several unrelated APIs all go
+quiet at once, suspect the inputs before concluding the platform cannot do it.
 
 ---
 
