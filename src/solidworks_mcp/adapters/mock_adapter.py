@@ -1640,6 +1640,52 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def pattern_linear(
+        self,
+        features: list[str],
+        direction: str = "x",
+        count: int = 2,
+        spacing: float = 10.0,
+        direction_edge: int | None = None,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock linear feature pattern.
+
+        Args:
+            features (list[str]): Feature names to repeat.
+            direction (str): Axis with optional sign.
+            count (int): Instances including the original.
+            spacing (float): Distance between instances in mm.
+            direction_edge (int | None): Explicit edge index override.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Pattern payload.
+        """
+        if not features:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="pattern_linear requires at least one feature name",
+            )
+        if count < 2:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="pattern_linear requires count >= 2",
+            )
+
+        await asyncio.sleep(self._delays["sketch_operation"] / 2)
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"LPattern{random.randint(1, 99)}",
+                "features": list(features),
+                "direction": direction,
+                "direction_edge": direction_edge if direction_edge is not None else 0,
+                "count": count,
+                "spacing": spacing,
+            },
+            execution_time=self._delays["sketch_operation"] / 2,
+        )
+
     async def check_sketch_fully_defined(
         self, sketch_name: str | None = None
     ) -> AdapterResult[dict[str, Any]]:

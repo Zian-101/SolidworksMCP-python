@@ -751,6 +751,29 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             },
         )
 
+    async def pattern_linear(
+        self,
+        features: list[str],
+        direction: str = "x",
+        count: int = 2,
+        spacing: float = 10.0,
+        direction_edge: int | None = None,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Linear feature pattern through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "pattern_linear",
+            lambda: self.adapter.pattern_linear(
+                features, direction, count, spacing, direction_edge
+            ),
+            input_dict={
+                "features": features,
+                "direction": direction,
+                "count": count,
+                "spacing": spacing,
+                "direction_edge": direction_edge,
+            },
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:

@@ -470,6 +470,42 @@ class CreateShellInput(CompatInput):
             raise ValueError("thickness must be positive")
 
 
+class PatternLinearInput(CompatInput):
+    """Input schema for repeating features along an axis.
+
+    Attributes:
+        features (list[str]): Feature names to repeat.
+        direction (str): Axis with optional sign, e.g. 'x', '-y'.
+        count (int): Instances including the original.
+        spacing (float): Distance between instances in millimetres.
+        direction_edge (int | None): Explicit edge index override.
+    """
+
+    features: list[str] = Field(
+        description="Feature names to repeat, e.g. ['Cut-Extrude1']"
+    )
+    direction: str = Field(
+        default="x",
+        description="Direction axis with optional sign: 'x', '-x', 'y', '-y', 'z', '-z'",
+    )
+    count: int = Field(
+        default=2, description="Total instances including the original (>= 2)"
+    )
+    spacing: float = Field(
+        default=10.0, description="Distance between instances in millimetres"
+    )
+    direction_edge: int | None = Field(
+        default=None,
+        description="Explicit edge index to use as direction, overriding 'direction'",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.features:
+            raise ValueError("features must contain at least one feature name")
+        if self.count < 2:
+            raise ValueError("count must be >= 2 (it includes the original)")
+
+
 class UndoInput(CompatInput):
     """Input schema for undoing recent operations.
 
@@ -1299,6 +1335,64 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in create_reference_plane tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def pattern_linear(input_data: PatternLinearInput) -> dict[str, Any]:
+        """Repeat one or more features along an axis (linear pattern).
+
+        Creates a Linear Pattern feature — e.g. turning a single hole into a
+        row of evenly spaced holes.
+
+        SolidWorks takes the direction from a model edge, so ``direction``
+        names an axis and a matching edge is found for you. **The sign
+        matters**: patterning toward the near side of the body marches the
+        copies off the edge and produces malformed geometry, so pick the
+        direction that runs into the material.
+
+        Args:
+            input_data (PatternLinearInput): Features, direction, count, spacing.
+
+        Returns:
+            dict[str, Any]: Status and pattern details.
+
+        Example:
+            ```python
+            # Three holes, 15 mm apart, marching along +x
+            await pattern_linear({
+                "features": ["Cut-Extrude1"],
+                "direction": "x",
+                "count": 3,
+                "spacing": 15.0,
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, PatternLinearInput)
+            result = await adapter.pattern_linear(
+                input_data.features,
+                input_data.direction,
+                input_data.count,
+                input_data.spacing,
+                input_data.direction_edge,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Patterned {len(input_data.features)} feature(s) into "
+                        f"{input_data.count} instances along {input_data.direction}"
+                    ),
+                    "pattern": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to create linear pattern: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in pattern_linear tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

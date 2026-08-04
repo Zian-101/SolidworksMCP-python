@@ -91,6 +91,18 @@ class SolidWorksFeaturesMixin:
     ) -> AdapterResult[dict[str, Any]]:
         return _create_shell_impl(self, thickness, remove_faces, outward)
 
+    async def pattern_linear(
+        self,
+        features: list[str],
+        direction: str = "x",
+        count: int = 2,
+        spacing: float = 10.0,
+        direction_edge: int | None = None,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _pattern_linear_impl(
+            self, features, direction, count, spacing, direction_edge
+        )
+
 
 def _create_extrusion_impl(
     adapter: Any, params: ExtrusionParameters
@@ -1059,6 +1071,248 @@ def _create_shell_impl(
     return cast(
         AdapterResult[dict[str, Any]],
         adapter._handle_com_operation("create_shell", _shell_operation),
+    )
+
+
+def _body_edges(adapter: Any) -> list[Any]:
+    """Return every edge of the first solid body in the active part.
+
+    Edge order is stable for a given model, so callers can address an edge by
+    index — SolidWorks edge *names* cannot be enumerated through this adapter.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        list[Any]: Edge COM objects, empty when no solid body is present.
+    """
+    model = adapter.currentModel
+    bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        bodies = adapter._attempt(
+            lambda: model.Extension.GetBodies2(0, True), default=None
+        )
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        return []
+    edges = adapter._attempt(lambda: bodies[0].GetEdges(), default=None)
+    return list(edges) if isinstance(edges, (list, tuple)) else []
+
+
+def _edge_directions(adapter: Any) -> list[tuple[int, tuple[float, float, float]]]:
+    """Return ``(index, direction_vector)`` for each straight edge of the body.
+
+    Direction is read from the edge's curve parameters; the edge object must be
+    flagged for ``IEdge`` first or the accessors come back as ``None`` under
+    pywin32 late binding.  Vectors point from the edge's start to its end, so
+    the sign matters: an edge running ``-x`` will march pattern instances off
+    the left of the model.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        list[tuple[int, tuple[float, float, float]]]: Index and direction for
+        each edge whose direction could be determined.
+    """
+    from solidworks_mcp.adapters import sw_type_info
+
+    results: list[tuple[int, tuple[float, float, float]]] = []
+    for index, edge in enumerate(_body_edges(adapter)):
+        adapter._attempt(
+            lambda e=edge: sw_type_info.flag_methods(e, "IEdge"), default=0
+        )
+        params: Any = None
+        for method in ("GetCurveParams2", "GetCurveParams"):
+            value = adapter._attempt(
+                lambda e=edge, m=method: getattr(e, m)(), default=None
+            )
+            if isinstance(value, (list, tuple)) and len(value) >= 6:
+                params = value
+                break
+        if params is None:
+            continue
+
+        nums = [float(v) for v in params[:6]]
+        vector = (nums[3] - nums[0], nums[4] - nums[1], nums[5] - nums[2])
+        length = max(abs(vector[0]), abs(vector[1]), abs(vector[2]))
+        if length < 1e-9:
+            continue
+        results.append((index, vector))
+    return results
+
+
+def _resolve_direction_edge(adapter: Any, direction: str) -> int | None:
+    """Find the index of an edge running along ``direction``.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+        direction: Axis with optional sign, e.g. ``"x"``, ``"+x"``, ``"-y"``.
+
+    Returns:
+        int | None: Matching edge index, or ``None`` when none matches.
+    """
+    wanted = (direction or "").strip().lower().replace("+", "")
+    negative = wanted.startswith("-")
+    axis = wanted.lstrip("-")
+    axis_index = {"x": 0, "y": 1, "z": 2}.get(axis)
+    if axis_index is None:
+        return None
+
+    for index, vector in _edge_directions(adapter):
+        magnitude = max(abs(vector[0]), abs(vector[1]), abs(vector[2]))
+        # Dominant component must be the requested axis.
+        if abs(vector[axis_index]) < magnitude - 1e-9:
+            continue
+        if (vector[axis_index] < 0) == negative:
+            return index
+    return None
+
+
+def _pattern_linear_impl(
+    adapter: Any,
+    features: list[str],
+    direction: str,
+    count: int,
+    spacing: float,
+    direction_edge: int | None,
+) -> AdapterResult[dict[str, Any]]:
+    """Repeat one or more features along a model axis.
+
+    Wraps ``IFeatureManager::FeatureLinearPattern``.  Preselection marks,
+    confirmed empirically on SW 2025: the **direction edge uses mark 1** and
+    each **feature to repeat uses mark 4**.
+
+    SolidWorks takes the pattern direction from a straight *edge*, and edge
+    names cannot be enumerated through this adapter.  Rather than make callers
+    guess an index, ``direction`` names an axis (``"x"``, ``"-y"``, ``"+z"``…)
+    and a matching edge is resolved automatically via
+    :func:`_resolve_direction_edge`.  **The sign matters**: an edge running
+    ``-x`` marches instances off the left of the model, which SolidWorks
+    happily accepts while producing malformed geometry.  ``direction_edge``
+    remains available as an explicit override.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        features: Names of features to repeat, e.g. ``["Cut-Extrude1"]``.
+        direction: Axis with optional sign — ``"x"``, ``"-x"``, ``"y"``, etc.
+        count: Total number of instances **including** the original (>= 2).
+        spacing: Distance between instances in **millimetres**.
+        direction_edge: Explicit edge index, overriding ``direction``.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Pattern details on success; ``ERROR``
+        when no matching edge exists, selection fails, or the model does not
+        change.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # Three holes marching along +x, 15 mm apart
+        await adapter.pattern_linear(["Cut-Extrude1"], "x", 3, 15.0)
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    feature_names = [f for f in (features or []) if f]
+    if not feature_names:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_linear requires at least one feature name",
+        )
+    if count < 2:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_linear requires count >= 2 (count includes the original)",
+        )
+
+    def _pattern_operation() -> dict[str, Any]:
+        """Inner COM closure: select direction edge + features, then pattern."""
+        volume_before = _model_volume(adapter)
+
+        edges = _body_edges(adapter)
+        if not edges:
+            raise Exception("No solid body found to pattern along")
+
+        if direction_edge is not None:
+            edge_index = direction_edge
+            if edge_index < 0 or edge_index >= len(edges):
+                raise Exception(
+                    f"direction_edge {edge_index} out of range - the body has "
+                    f"{len(edges)} edges (0-{len(edges) - 1})"
+                )
+        else:
+            resolved = _resolve_direction_edge(adapter, direction)
+            if resolved is None:
+                available = sorted(
+                    {
+                        ("-" if v[i] < 0 else "")
+                        + "xyz"[i]
+                        for _, v in _edge_directions(adapter)
+                        for i in (0, 1, 2)
+                        if abs(v[i]) >= max(abs(v[0]), abs(v[1]), abs(v[2])) - 1e-9
+                    }
+                )
+                raise Exception(
+                    f"No edge runs along '{direction}'. Directions available "
+                    f"on this body: {', '.join(available) or 'none'}."
+                )
+            edge_index = resolved
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        if not adapter._attempt(
+            lambda: edges[edge_index].Select2(True, 1), default=False
+        ):
+            raise Exception(f"Failed to select direction edge {edge_index}")
+
+        for name in feature_names:
+            if not _select_named_feature(adapter, name, 4, append=True):
+                raise Exception(f"Failed to select feature to pattern: {name}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.FeatureLinearPattern(
+            int(count),  # Num1
+            spacing / 1000.0,  # Spacing1 (m)
+            1,  # Num2 (second direction unused)
+            0.0,  # Spacing2
+            False,  # FlipDir1 - direction comes from the chosen edge
+            False,  # FlipDir2
+            "",  # DName1
+            "",  # DName2
+        )
+
+        volume_after = _model_volume(adapter)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            raise Exception(
+                "Pattern produced no new geometry "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                f"The instances may fall outside the body - try the opposite "
+                f"direction, a smaller spacing, or a lower count."
+            )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="LPattern",
+                )
+                if feature
+                else "LPattern"
+            ),
+            "features": feature_names,
+            "direction": direction if direction_edge is None else f"edge {edge_index}",
+            "direction_edge": edge_index,
+            "count": int(count),
+            "spacing": spacing,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("pattern_linear", _pattern_operation),
     )
 
 

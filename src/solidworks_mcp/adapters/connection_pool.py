@@ -679,6 +679,22 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             lambda adapter: adapter.create_shell(thickness, remove_faces, outward),
         )
 
+    async def pattern_linear(
+        self,
+        features: list[str],
+        direction: str = "x",
+        count: int = 2,
+        spacing: float = 10.0,
+        direction_edge: int | None = None,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Linear feature pattern using pool."""
+        return await self._execute_with_pool(
+            "pattern_linear",
+            lambda adapter: adapter.pattern_linear(
+                features, direction, count, spacing, direction_edge
+            ),
+        )
+
     async def create_revolve(
         self, params: RevolveParameters
     ) -> AdapterResult[SolidWorksFeature]:

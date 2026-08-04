@@ -1079,6 +1079,31 @@ class SolidWorksAdapter(ABC):
             error="create_shell is not implemented by this adapter",
         )
 
+    async def pattern_linear(
+        self,
+        features: list[str],
+        direction: str = "x",
+        count: int = 2,
+        spacing: float = 10.0,
+        direction_edge: int | None = None,
+    ) -> "AdapterResult[Any]":
+        """Repeat features along a model axis.
+
+        Args:
+            features (list[str]): Feature names to repeat.
+            direction (str): Axis with optional sign, e.g. ``"x"``, ``"-y"``.
+            count (int): Instances including the original (>= 2).
+            spacing (float): Distance between instances in millimetres.
+            direction_edge (int | None): Explicit edge index override.
+
+        Returns:
+            AdapterResult: Pattern details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="pattern_linear is not implemented by this adapter",
+        )
+
     @abstractmethod
     async def exit_sketch(self) -> AdapterResult[None]:
         """Exit sketch editing mode.
