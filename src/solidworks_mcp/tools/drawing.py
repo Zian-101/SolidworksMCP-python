@@ -13,6 +13,31 @@ from pydantic import BaseModel, Field
 from ..adapters.base import SolidWorksAdapter
 from .input_compat import CompatInput
 
+
+def _normalize_input(input_data: Any, model_type: type) -> Any:
+    """Accept either a model instance or a plain dict.
+
+    FastMCP hands these tools a validated model, but they are also called
+    directly with dicts — from tests, from the agent harness, and from other
+    tools. Without this the tool raised ``'dict' object has no attribute ...``
+    instead of doing the work.
+
+    Args:
+        input_data (Any): The incoming payload.
+        model_type (type): The Pydantic model to coerce to.
+
+    Returns:
+        Any: An instance of ``model_type``.
+    """
+    if input_data is None:
+        return model_type()
+    if isinstance(input_data, model_type):
+        return input_data
+    if hasattr(input_data, "model_dump"):
+        return model_type.model_validate(input_data.model_dump())
+    return model_type.model_validate(input_data)
+
+
 # Input schemas using Python 3.14 built-in types
 
 
@@ -396,6 +421,7 @@ async def register_drawing_tools(
                             - Multiple views can reference the same model file
         """
         try:
+            input_data = _normalize_input(input_data, CreateDrawingViewInput)
             result = await adapter.add_drawing_view(
                 input_data.model_path,
                 input_data.orientation,
@@ -640,6 +666,7 @@ async def register_drawing_tools(
                                     - Position carefully to avoid dimension conflicts
         """
         try:
+            input_data = _normalize_input(input_data, AddNoteInput)
             result = await adapter.add_drawing_note(
                 input_data.text,
                 input_data.position_x,
@@ -704,6 +731,7 @@ async def register_drawing_tools(
                             - Essential for showing internal features and assemblies
         """
         try:
+            input_data = _normalize_input(input_data, CreateSectionViewInput)
             # A section view needs a section line sketched on a parent
             # view first; this adapter cannot create that sketch, so it says so
             # instead of reporting a view that does not exist.
@@ -769,6 +797,7 @@ async def register_drawing_tools(
                             - Essential for communicating tight tolerance requirements
         """
         try:
+            input_data = _normalize_input(input_data, CreateDetailViewInput)
             # A detail view needs a detail circle sketched on a parent
             # view first; this adapter cannot create that sketch.
             return {
@@ -834,6 +863,7 @@ async def register_drawing_tools(
                             - Essential for drawing control and document management systems
         """
         try:
+            input_data = _normalize_input(input_data, UpdateSheetFormatInput)
             # Reported nothing real: the sheet was never touched and the
             # title-block values were echoed straight back.
             return {
