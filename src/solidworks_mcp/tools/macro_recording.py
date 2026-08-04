@@ -378,31 +378,25 @@ End Sub"""
                     "message": result.error or "Failed to execute macro",
                 }
 
-            execution_results = []
+            # No adapter support means the macro never ran. Reporting a run
+            # time of "2.1 s" and "3 features created" described work that did
+            # not happen.
+            return {
+                "status": "error",
+                "message": (
+                    "Macro execution is unavailable: the active adapter does "
+                    "not implement execute_macro, so the macro was not run. "
+                    "Run it from the SolidWorks Macro toolbar instead."
+                ),
+                "requested": {
+                    "macro_path": input_data.macro_path,
+                    "repeat_count": input_data.repeat_count,
+                },
+            }
 
-            for run in range(input_data.repeat_count):
-                run_result = {
-                    "run_number": run + 1,
-                    "status": "success",
-                    "execution_time": 2.1 + (run * 0.1),  # Simulated timing
-                    "features_created": 3,
-                    "errors": 0,
-                    "warnings": 0,
-                }
-
-                execution_results.append(run_result)
-
-                # Simulate pause between runs
-                if (
-                    input_data.pause_between_runs > 0
-                    and run < input_data.repeat_count - 1
-                ):
-                    time.sleep(
-                        min(input_data.pause_between_runs, 1.0)
-                    )  # Cap the actual sleep
-
-            total_time = sum(r["execution_time"] for r in execution_results)
-            total_features = sum(r["features_created"] for r in execution_results)
+            execution_results: list[dict[str, Any]] = []
+            total_time = 0.0
+            total_features = 0
 
             return {
                 "status": "success",

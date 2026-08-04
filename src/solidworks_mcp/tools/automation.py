@@ -402,15 +402,19 @@ End Sub
                     "message": result.error or "Failed to start macro recording",
                 }
 
-            # For now, simulate macro recording start
+            # Nothing was ever started: this reported "recording" with a
+            # fixed 2024 timestamp while SolidWorks did nothing.
             return {
-                "status": "success",
-                "message": f"Started recording macro: {input_data.macro_name}",
-                "macro_recording": {
+                "status": "error",
+                "message": (
+                    "Starting a macro recording is not supported through this "
+                    "adapter - SolidWorks drives recording from its UI. Use "
+                    "Tools > Macro > Record, or generate a macro with the "
+                    "generate_vba_* tools."
+                ),
+                "requested": {
                     "macro_name": input_data.macro_name,
                     "description": input_data.description,
-                    "status": "recording",
-                    "start_time": "2024-01-01T10:00:00Z",
                 },
             }
 
@@ -434,17 +438,15 @@ End Sub
         Returns:
             dict[str, Any]: A dictionary containing the resulting values.
         """
-        # For now, simulate macro recording stop
+        # Nothing was ever recording. This used to report a 5-minute session
+        # with 15 actions captured to a macro file that does not exist.
         return {
-            "status": "success",
-            "message": "Stopped macro recording",
-            "macro_recording": {
-                "status": "stopped",
-                "end_time": "2024-01-01T10:05:00Z",
-                "duration": "5 minutes",
-                "actions_recorded": 15,
-                "file_location": "C:\\Users\\User\\AppData\\Local\\SolidWorks\\Macros\\recorded_macro.swp",
-            },
+            "status": "error",
+            "message": (
+                "Stopping a macro recording is not supported through this "
+                "adapter - SolidWorks drives recording from its UI. Use "
+                "Tools > Macro > Stop."
+            ),
         }
 
     @mcp.tool()
