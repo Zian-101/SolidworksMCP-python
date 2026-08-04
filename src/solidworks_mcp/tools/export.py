@@ -926,17 +926,20 @@ async def register_export_tools(
                     "message": result.error or "Batch export failed",
                 }
 
+            # Reaching here means the adapter has no batch_export, so nothing
+            # was exported at all. Reporting "completed" with zero files read
+            # as a successful no-op run.
             return {
-                "status": "success",
-                "message": f"Batch export completed to {input_data.format_type} format",
-                "batch_export": {
+                "status": "error",
+                "message": (
+                    "Batch export is unavailable: the active adapter does not "
+                    "implement batch_export, so no files were processed. "
+                    "Export files individually with export_step/export_stl/etc."
+                ),
+                "requested": {
                     "source_directory": input_data.source_directory,
                     "output_directory": input_data.output_directory,
                     "format": input_data.format_type.upper(),
-                    "files_processed": 0,  # Would be actual count
-                    "files_successful": 0,
-                    "files_failed": 0,
-                    "errors": [],
                 },
             }
 

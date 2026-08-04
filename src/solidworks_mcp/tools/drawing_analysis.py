@@ -1043,276 +1043,130 @@ async def register_drawing_analysis_tools(
 
     @mcp.tool()
     async def compare_drawing_versions(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Compare different versions of drawing files.
+        """Compare two drawing files.
+
+        Reports what can be established from the files themselves: that both exist,
+        their sizes and modification times, and whether their bytes are identical.
+
+        Comparing *content* — which views changed, which dimensions moved — is not
+        implemented. This tool used to return invented revision letters, dates and
+        change descriptions such as "Added fillet to corner" for drawings it never
+        opened. Use SolidWorks Drawing Compare for a real content diff.
 
         Args:
-            input_data (dict[str, Any]): The input data value.
+            input_data (dict[str, Any]): ``drawing_version_1`` and
+                ``drawing_version_2`` paths.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await compare_drawing_versions(version_input)
-        """
-        """
-        Compare two versions of a drawing to identify changes.
-
-        This tool analyzes differences between drawing revisions.
+            dict[str, Any]: File-level comparison, or an error.
         """
         try:
-            drawing_v1 = input_data.get("drawing_version_1", "")
-            drawing_v2 = input_data.get("drawing_version_2", "")
-            comparison_type = input_data.get(
-                "comparison_type", "full"
-            )  # full, geometry, annotations
+            import hashlib
+            from datetime import datetime, timezone
+            from pathlib import Path
 
-            comparison_results = {
-                "comparison_info": {
-                    "version_1": {
-                        "path": drawing_v1,
-                        "date": "2024-01-10",
-                        "revision": "A",
-                    },
-                    "version_2": {
-                        "path": drawing_v2,
-                        "date": "2024-01-15",
-                        "revision": "B",
-                    },
-                    "comparison_date": "2024-01-15",
-                    "comparison_type": comparison_type,
-                },
-                "geometric_changes": {
-                    "views_modified": [
-                        {
-                            "view": "Front view",
-                            "change_type": "Geometry updated",
-                            "description": "Added fillet to corner",
-                        },
-                        {
-                            "view": "Section A-A",
-                            "change_type": "New feature",
-                            "description": "Added threaded hole",
-                        },
-                    ],
-                    "views_added": [],
-                    "views_removed": [],
-                    "scale_changes": [],
-                },
-                "dimension_changes": {
-                    "dimensions_added": [
-                        {
-                            "dimension": "Ø8 hole",
-                            "location": "Front view",
-                            "value": "8.0",
-                        },
-                        {
-                            "dimension": "R2 fillet",
-                            "location": "Front view",
-                            "value": "2.0",
-                        },
-                    ],
-                    "dimensions_modified": [
-                        {
-                            "dimension": "Overall length",
-                            "old_value": "100.0",
-                            "new_value": "102.0",
-                            "change": "+2.0",
-                        }
-                    ],
-                    "dimensions_removed": [],
-                    "tolerance_changes": [
-                        {
-                            "dimension": "Ø25 bore",
-                            "old_tolerance": "±0.1",
-                            "new_tolerance": "H7",
-                        }
-                    ],
-                },
-                "annotation_changes": {
-                    "notes_added": ["BREAK ALL SHARP EDGES"],
-                    "notes_modified": [],
-                    "notes_removed": [],
-                    "symbol_changes": [
-                        {
-                            "symbol": "Surface finish",
-                            "location": "Bore surface",
-                            "change": "Ra 1.6 → Ra 0.8",
-                        }
-                    ],
-                },
-                "title_block_changes": {
-                    "revision_updated": {"from": "A", "to": "B"},
-                    "date_updated": {"from": "2024-01-10", "to": "2024-01-15"},
-                    "description": "Added threaded hole, updated overall length",
-                    "approved_by": "J. Smith",
-                },
-                "impact_assessment": {
-                    "manufacturing_impact": "Medium - Requires tooling update for new hole",
-                    "assembly_impact": "Low - No assembly changes required",
-                    "cost_impact": "Low - Minor machining addition",
-                    "lead_time_impact": "None - No new suppliers required",
-                },
-            }
+            first = str(input_data.get("drawing_version_1", "")).strip()
+            second = str(input_data.get("drawing_version_2", "")).strip()
+            if not first or not second:
+                return {
+                    "status": "error",
+                    "message": (
+                        "compare_drawing_versions requires drawing_version_1 "
+                        "and drawing_version_2"
+                    ),
+                }
+
+            missing = [p for p in (first, second) if not Path(p).exists()]
+            if missing:
+                return {
+                    "status": "error",
+                    "message": f"File(s) not found: {', '.join(missing)}",
+                }
+
+            def describe(path_str: str) -> dict[str, Any]:
+                """Read the file-level facts for one drawing."""
+                path = Path(path_str)
+                stat = path.stat()
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                return {
+                    "path": str(path),
+                    "size_bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat(),
+                    "sha256": digest,
+                }
+
+            info1, info2 = describe(first), describe(second)
+            identical = info1["sha256"] == info2["sha256"]
 
             return {
                 "status": "success",
-                "message": "Drawing version comparison completed",
-                "comparison_results": comparison_results,
-                "change_summary": {
-                    "total_changes": 8,
-                    "geometric_changes": 2,
-                    "dimensional_changes": 3,
-                    "annotation_changes": 2,
-                    "administrative_changes": 1,
+                "message": (
+                    "Files are byte-identical"
+                    if identical
+                    else "Files differ (content-level diff not available)"
+                ),
+                "comparison": {
+                    "version_1": info1,
+                    "version_2": info2,
+                    "identical": identical,
+                    "size_delta_bytes": info2["size_bytes"] - info1["size_bytes"],
                 },
-                "change_significance": {
-                    "level": "Medium",
-                    "requires_approval": True,
-                    "requires_manufacturing_review": True,
-                    "requires_quality_review": False,
-                },
+                "note": (
+                    "Only file-level facts are reported. Which views or "
+                    "dimensions changed is not available through this adapter - "
+                    "use SolidWorks Drawing Compare."
+                ),
             }
 
         except Exception as e:
             logger.error(f"Error in compare_drawing_versions tool: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to compare versions: {str(e)}",
-            }
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def validate_drawing_completeness(
         input_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Validate drawing completeness for production readiness.
+        """Report whether the active drawing carries views, dimensions and notes.
 
-        Args:
-            input_data (dict[str, Any]): The input data value.
+        Counts what is actually on the drawing. It does not score the drawing against
+        a checklist: the previous version returned a completeness percentage and a
+        list of missing items for a drawing it never opened.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await validate_drawing_completeness(validation_input)
-        """
-        """
-        Validate that a drawing contains all necessary information for manufacturing.
-
-        This tool checks for completeness from a manufacturing perspective.
+            dict[str, Any]: Real counts per view, or an error.
         """
         try:
-            input_data.get("drawing_path", "")
-            input_data.get(
-                "manufacturing_type", "machining"
-            )  # machining, casting, forming
+            result = await adapter.list_drawing_views()
+            if not result.is_success:
+                return {
+                    "status": "error",
+                    "message": f"Could not read the drawing: {result.error}",
+                }
 
-            completeness_check = {
-                "dimensional_completeness": {
-                    "all_features_dimensioned": True,
-                    "critical_dimensions": {
-                        "identified": 12,
-                        "toleranced": 10,
-                        "missing_tolerances": ["Chamfer size", "Thread depth"],
-                    },
-                    "location_dimensions": {
-                        "holes": "Complete",
-                        "slots": "Missing width dimension",
-                        "features": "Complete",
-                    },
-                    "size_dimensions": {
-                        "external_features": "Complete",
-                        "internal_features": "Nearly complete",
-                        "missing": ["Internal groove width"],
-                    },
-                },
-                "manufacturing_requirements": {
-                    "material_specification": {
-                        "specified": True,
-                        "complete": True,
-                        "material": "AISI 1045 Steel",
-                        "condition": "Normalized",
-                    },
-                    "surface_finish": {
-                        "specified": True,
-                        "coverage": "85%",
-                        "missing_surfaces": ["Internal bore", "Thread lead-in"],
-                    },
-                    "geometric_tolerances": {
-                        "specified": True,
-                        "adequate": True,
-                        "types": ["Concentricity", "Perpendicularity", "Flatness"],
-                    },
-                    "manufacturing_notes": {
-                        "present": True,
-                        "adequate": True,
-                        "examples": ["Deburr all edges", "Machine finish"],
-                    },
-                },
-                "quality_requirements": {
-                    "inspection_dimensions": {
-                        "critical_features": "Identified",
-                        "inspection_method": "Coordinate measuring",
-                        "sampling_plan": "Not specified",
-                    },
-                    "testing_requirements": {
-                        "material_properties": "Referenced to ASTM standards",
-                        "functional_testing": "Not specified",
-                        "acceptance_criteria": "Drawing tolerances",
-                    },
-                },
-                "documentation_completeness": {
-                    "title_block": {
-                        "complete": True,
-                        "part_number": "Present",
-                        "revision": "Present",
-                        "approvals": "Missing check signatures",
-                    },
-                    "reference_documents": {
-                        "standards": ["ISO 2768-1 for general tolerances"],
-                        "specifications": ["Company spec CS-100"],
-                        "procedures": ["Manufacturing procedure MP-500"],
-                    },
-                },
-            }
-
-            completeness_score = 87
-            blocking_issues = [
-                "Missing check signatures",
-                "Incomplete surface finish specification",
-            ]
-            recommendations = [
-                "Add surface finish specification to internal bore",
-                "Specify thread depth dimension",
-                "Add sampling plan for inspection",
-                "Complete approval signatures",
-            ]
+            views = result.data if isinstance(result.data, list) else []
+            findings: list[str] = []
+            if not views:
+                findings.append("The drawing has no views.")
 
             return {
                 "status": "success",
-                "message": "Drawing completeness validation completed",
-                "completeness_check": completeness_check,
-                "validation_results": {
-                    "completeness_score": completeness_score,
-                    "manufacturing_ready": completeness_score >= 90,
-                    "blocking_issues": len(blocking_issues),
-                    "recommendations": len(recommendations),
+                "message": f"Drawing carries {len(views)} view(s)",
+                "completeness": {
+                    "view_count": len(views),
+                    "views": views,
+                    "findings": findings,
                 },
-                "blocking_issues": blocking_issues,
-                "recommendations": recommendations,
-                "manufacturing_readiness": {
-                    "ready_for_quoting": True,
-                    "ready_for_manufacturing": False,
-                    "required_actions": "Complete missing specifications and approvals",
-                    "estimated_completion_effort": "2 hours",
-                },
+                "note": (
+                    "Counts only. Scoring a drawing against a drafting standard "
+                    "is not implemented - use SolidWorks Design Checker."
+                ),
             }
 
         except Exception as e:
             logger.error(f"Error in validate_drawing_completeness tool: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to validate completeness: {str(e)}",
-            }
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     tool_count = 8  # Legacy count expected by tests
     return tool_count

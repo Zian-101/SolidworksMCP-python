@@ -4,7 +4,11 @@ Provides tools for managing SolidWorks templates including extraction, applicati
 comparison, and library management.
 """
 
+import json
+import os
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -104,6 +108,47 @@ class TemplateComparisonInput(CompatInput):
     include_materials: bool = Field(default=True, description="Include materials")
     generate_report: bool = Field(
         default=True, description="Generate comparison report"
+    )
+
+
+def _library_path() -> Path:
+    """Return the on-disk path of the template library index.
+
+    Returns:
+        Path: ``template_library.json`` under the per-user app data directory.
+    """
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    directory = Path(base) / "solidworks_mcp"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "template_library.json"
+
+
+def _load_library() -> dict[str, Any]:
+    """Read the template library, tolerating a missing or corrupt file.
+
+    Returns:
+        dict[str, Any]: ``{"templates": [...]}``.
+    """
+    path = _library_path()
+    if not path.exists():
+        return {"templates": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"templates": []}
+    if not isinstance(data, dict) or not isinstance(data.get("templates"), list):
+        return {"templates": []}
+    return data
+
+
+def _save_library(library: dict[str, Any]) -> None:
+    """Write the template library index.
+
+    Args:
+        library (dict[str, Any]): The library to persist.
+    """
+    _library_path().write_text(
+        json.dumps(library, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -358,99 +403,73 @@ async def register_template_management_tools(
 
     @mcp.tool()
     async def compare_templates(input_data: TemplateComparisonInput) -> dict[str, Any]:
-        """Compare two templates and generate difference report.
+        """Compare two template files.
 
-        This tool analyzes differences between templates to help understand variations in
-        formatting and properties.
+        Reports file-level facts only: existence, size, modification time and whether
+        the bytes are identical.
+
+        This tool used to invent a similarity percentage and a list of differences —
+        fonts, units, custom properties — for templates it never opened. Those
+        numbers were not derived from the files at all.
 
         Args:
-            input_data (TemplateComparisonInput): The input data value.
+            input_data (CompareTemplatesInput): The two template paths.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await compare_templates(comparison_input)
+            dict[str, Any]: File-level comparison, or an error.
         """
         try:
-            if hasattr(adapter, "compare_templates"):
-                result = await adapter.compare_templates(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Template comparison completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
+            import hashlib
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            first = str(getattr(input_data, "template1_path", "") or "").strip()
+            second = str(getattr(input_data, "template2_path", "") or "").strip()
+            if not first or not second:
                 return {
                     "status": "error",
-                    "message": result.error or "Failed to compare templates",
+                    "message": "compare_templates requires two template paths",
                 }
 
-            # Simulate template comparison
-            differences = {
-                "document_properties": {
-                    "units": {
-                        "template1": "mm-kg-s",
-                        "template2": "in-lbm-s",
-                        "different": True,
-                    },
-                    "precision": {"template1": 2, "template2": 3, "different": True},
-                    "font": {
-                        "template1": "Arial",
-                        "template2": "Century Gothic",
-                        "different": True,
-                    },
-                },
-                "custom_properties": {
-                    "added_in_template2": ["RevisionDate", "Designer"],
-                    "removed_from_template1": ["OldProperty"],
-                    "modified": [
-                        {
-                            "property": "Material",
-                            "template1": "Steel",
-                            "template2": "Aluminum",
-                        }
-                    ],
-                },
-                "dimension_formatting": {
-                    "decimal_places": {
-                        "template1": 2,
-                        "template2": 2,
-                        "different": False,
-                    },
-                    "units_display": {
-                        "template1": True,
-                        "template2": False,
-                        "different": True,
-                    },
-                },
-            }
+            missing = [p for p in (first, second) if not Path(p).exists()]
+            if missing:
+                return {
+                    "status": "error",
+                    "message": f"Template(s) not found: {', '.join(missing)}",
+                }
 
-            similarity_score = 0.0
+            def describe(path_str: str) -> dict[str, Any]:
+                """Read the file-level facts for one template."""
+                path = Path(path_str)
+                stat = path.stat()
+                return {
+                    "path": str(path),
+                    "size_bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat(),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
 
-            comparison_report = {
-                "template1": input_data.template1_path,
-                "template2": input_data.template2_path,
-                "comparison_type": input_data.comparison_type,
-                "similarity_score": similarity_score,
-                "differences_found": differences,
-                "recommendations": [
-                    "Consider standardizing units system across templates",
-                    "Review custom property naming conventions",
-                    "Align dimension formatting for consistency",
-                ],
-            }
+            info1, info2 = describe(first), describe(second)
+            identical = info1["sha256"] == info2["sha256"]
 
             return {
                 "status": "success",
-                "message": f"Template comparison completed - {similarity_score}% similar",
-                "comparison": comparison_report,
-                "analysis": {
-                    "major_differences": 3,
-                    "minor_differences": 2,
-                    "compatibility": "High" if similarity_score > 80 else "Medium",
+                "message": (
+                    "Templates are byte-identical"
+                    if identical
+                    else "Templates differ (content-level diff not available)"
+                ),
+                "comparison": {
+                    "template1": info1,
+                    "template2": info2,
+                    "identical": identical,
                 },
+                "note": (
+                    "Only file-level facts are reported. Comparing units, fonts "
+                    "or custom properties is not implemented."
+                ),
             }
 
         except Exception as e:
@@ -462,21 +481,21 @@ async def register_template_management_tools(
 
     @mcp.tool()
     async def save_to_template_library(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Save template to the organization's template library.
+        """Record a template in the local template library.
 
-        This tool manages a centralized template library with categorization and version
-        control.
+        The library is a JSON file on disk (``template_library.json`` under the
+        per-user application data directory), so entries persist across sessions and
+        can be listed back. It used to return a fabricated ``total_templates: 47``
+        alongside category counts for a library that did not exist.
 
         Args:
-            input_data (dict[str, Any]): The input data value.
+            input_data (dict[str, Any]): ``template_path`` plus optional
+                ``template_name``, ``category``, ``version``, ``description``,
+                ``author`` and ``tags``.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await save_to_template_library(library_input)
+            dict[str, Any]: The stored entry and the library's real statistics.
         """
-
         try:
             if hasattr(adapter, "save_to_template_library"):
                 result = await adapter.save_to_template_library(input_data)
@@ -492,53 +511,57 @@ async def register_template_management_tools(
                     "message": result.error or "Failed to save to library",
                 }
 
-            template_path = input_data.get("template_path", "")
-            library_category = input_data.get("category", "uncategorized")
-            version = input_data.get("version", "1.0")
-            description = input_data.get("description", "")
-            author = input_data.get("author", "Unknown")
+            template_path = str(input_data.get("template_path", "")).strip()
+            if not template_path:
+                return {"status": "error", "message": "template_path is required"}
+            if not Path(template_path).exists():
+                return {
+                    "status": "error",
+                    "message": f"Template file not found: {template_path}",
+                }
 
-            library_entry = {
-                "template_id": f"TPL-{library_category.upper()}-{int(time.time()) % 10000}",
-                "name": input_data.get("template_name", "Unnamed Template"),
-                "category": library_category,
-                "version": version,
-                "author": author,
-                "description": description,
-                "created_date": "2024-01-15",  # Would be current date
-                "file_path": template_path,
-                "usage_count": 0,
-                "tags": input_data.get("tags", []),
-                "compatible_versions": [
-                    "SW2020",
-                    "SW2021",
-                    "SW2022",
-                    "SW2023",
-                    "SW2024",
-                ],
+            category = str(input_data.get("category", "uncategorized"))
+            library = _load_library()
+            entry = {
+                "template_id": (
+                    f"TPL-{category.upper()}-{len(library['templates']) + 1:04d}"
+                ),
+                "name": input_data.get(
+                    "template_name", Path(template_path).stem
+                ),
+                "category": category,
+                "version": str(input_data.get("version", "1.0")),
+                "author": str(input_data.get("author", "")),
+                "description": str(input_data.get("description", "")),
+                "created": datetime.now(timezone.utc).isoformat(),
+                "file_path": str(Path(template_path).resolve()),
+                "size_bytes": Path(template_path).stat().st_size,
+                "tags": list(input_data.get("tags", []) or []),
             }
+
+            # Replace an existing entry for the same file rather than duplicating.
+            library["templates"] = [
+                t
+                for t in library["templates"]
+                if t.get("file_path") != entry["file_path"]
+            ]
+            library["templates"].append(entry)
+            _save_library(library)
+
+            categories: dict[str, int] = {}
+            for template in library["templates"]:
+                key = str(template.get("category", "uncategorized"))
+                categories[key] = categories.get(key, 0) + 1
 
             return {
                 "status": "success",
-                "message": f"Template saved to library as {library_entry['template_id']}",
-                "library_entry": library_entry,
+                "message": f"Saved to library as {entry['template_id']}",
+                "library_entry": entry,
                 "library_stats": {
-                    "total_templates": 47,  # Simulated library stats
-                    "category_count": {
-                        "parts": 15,
-                        "assemblies": 12,
-                        "drawings": 8,
-                        "custom": 12,
-                    },
-                    "most_popular": "STD-PART-001",
-                    "latest_addition": library_entry["template_id"],
+                    "total_templates": len(library["templates"]),
+                    "category_count": categories,
+                    "library_file": str(_library_path()),
                 },
-                "usage_instructions": [
-                    "Template is now available in library browser",
-                    "Use template_id for quick access",
-                    "Template will appear in category filters",
-                    "Version control enabled for updates",
-                ],
             }
 
         except Exception as e:
@@ -550,118 +573,68 @@ async def register_template_management_tools(
 
     @mcp.tool()
     async def list_template_library(input_data: dict[str, Any]) -> dict[str, Any]:
-        """List available templates from the template library.
+        """List the templates recorded in the local template library.
 
-        This tool provides browsing and searching capabilities for the organization's template
-        library.
+        Reads the JSON library written by ``save_to_template_library``. Entries whose
+        file has since been deleted are flagged rather than silently listed as
+        available. The previous version returned a fixed catalogue of templates that
+        were never registered by anyone.
 
         Args:
-            input_data (dict[str, Any]): The input data value.
+            input_data (dict[str, Any] | None): Optional ``category`` filter.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await list_template_library(list_input)
+            dict[str, Any]: The stored entries and real statistics.
         """
         try:
             if hasattr(adapter, "list_template_library"):
-                result = await adapter.list_template_library(input_data)
+                result = await adapter.list_template_library(input_data or {})
                 if result.is_success:
                     return {
                         "status": "success",
-                        "message": "Template library listed successfully",
+                        "message": "Template library listed",
                         "data": result.data,
                         "execution_time": result.execution_time,
                     }
                 return {
                     "status": "error",
-                    "message": result.error or "Failed to list template library",
+                    "message": result.error or "Failed to list library",
                 }
 
-            category_filter = input_data.get("category", "all")
-            search_term = input_data.get("search_term", "")
-            sort_by = input_data.get("sort_by", "name")  # name, date, usage
+            payload = input_data or {}
+            wanted = str(payload.get("category", "") or "").strip().lower()
 
-            # Simulated template library
-            library_templates = [
-                {
-                    "template_id": "STD-PART-001",
-                    "name": "Standard Part Template",
-                    "category": "parts",
-                    "version": "2.1",
-                    "author": "Engineering Team",
-                    "description": "Standard template for mechanical parts with ISO properties",
-                    "usage_count": 145,
-                    "last_updated": "2024-01-10",
-                    "tags": ["standard", "mechanical", "iso"],
-                },
-                {
-                    "template_id": "ASM-MAIN-002",
-                    "name": "Main Assembly Template",
-                    "category": "assemblies",
-                    "version": "1.5",
-                    "author": "Design Team",
-                    "description": "Template for main assembly documentation and BOM",
-                    "usage_count": 87,
-                    "last_updated": "2024-01-08",
-                    "tags": ["assembly", "bom", "documentation"],
-                },
-                {
-                    "template_id": "DRW-ISO-003",
-                    "name": "ISO Drawing Template",
-                    "category": "drawings",
-                    "version": "3.0",
-                    "author": "Drafting Team",
-                    "description": "ISO standard drawing template with title block",
-                    "usage_count": 203,
-                    "last_updated": "2024-01-12",
-                    "tags": ["drawing", "iso", "title-block"],
-                },
-            ]
-
-            # Apply filters
-            filtered_templates = library_templates
-            if category_filter != "all":
-                filtered_templates = [
-                    t for t in filtered_templates if t["category"] == category_filter
-                ]
-
-            if search_term:
-                filtered_templates = [
+            library = _load_library()
+            templates = library["templates"]
+            if wanted:
+                templates = [
                     t
-                    for t in filtered_templates
-                    if search_term.lower() in t["name"].lower()
-                    or search_term.lower() in t["description"].lower()
+                    for t in templates
+                    if str(t.get("category", "")).lower() == wanted
                 ]
 
-            # Apply sorting
-            if sort_by == "usage":
-                filtered_templates.sort(key=lambda x: x["usage_count"], reverse=True)
-            elif sort_by == "date":
-                filtered_templates.sort(key=lambda x: x["last_updated"], reverse=True)
-            else:  # name
-                filtered_templates.sort(key=lambda x: x["name"])
+            for template in templates:
+                template["file_exists"] = Path(
+                    str(template.get("file_path", ""))
+                ).exists()
 
+            categories: dict[str, int] = {}
+            for template in library["templates"]:
+                key = str(template.get("category", "uncategorized"))
+                categories[key] = categories.get(key, 0) + 1
+
+            missing = [t["name"] for t in templates if not t["file_exists"]]
             return {
                 "status": "success",
-                "message": f"Found {len(filtered_templates)} templates matching criteria",
-                "library_search": {
-                    "category_filter": category_filter,
-                    "search_term": search_term,
-                    "sort_by": sort_by,
-                    "total_results": len(filtered_templates),
-                },
-                "templates": filtered_templates,
-                "categories_available": ["parts", "assemblies", "drawings", "custom"],
-                "library_summary": {
-                    "total_templates": len(library_templates),
-                    "most_used": max(library_templates, key=lambda x: x["usage_count"])[
-                        "name"
-                    ],
-                    "newest": max(library_templates, key=lambda x: x["last_updated"])[
-                        "name"
-                    ],
+                "message": (
+                    f"{len(templates)} template(s) in the library"
+                    + (f"; {len(missing)} missing on disk" if missing else "")
+                ),
+                "templates": templates,
+                "library_stats": {
+                    "total_templates": len(library["templates"]),
+                    "category_count": categories,
+                    "library_file": str(_library_path()),
                 },
             }
 
@@ -669,7 +642,7 @@ async def register_template_management_tools(
             logger.error(f"Error in list_template_library tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed to list library: {str(e)}",
+                "message": f"Failed to list template library: {str(e)}",
             }
 
     tool_count = 6  # Template management tools

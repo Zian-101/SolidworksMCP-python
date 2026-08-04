@@ -320,7 +320,7 @@ async def register_file_management_tools(
             return {
                 "status": "success",
                 "message": "File saved successfully",
-                "timestamp": "2024-03-14T00:00:00Z",  # Would be actual timestamp
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
