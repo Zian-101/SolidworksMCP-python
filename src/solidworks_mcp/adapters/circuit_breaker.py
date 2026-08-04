@@ -774,6 +774,58 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             },
         )
 
+    async def add_draft(
+        self,
+        angle: float,
+        neutral_face: int = 0,
+        draft_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Draft through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "add_draft",
+            lambda: self.adapter.add_draft(angle, neutral_face, draft_faces, outward),
+            input_dict={
+                "angle": angle,
+                "neutral_face": neutral_face,
+                "draft_faces": draft_faces,
+                "outward": outward,
+            },
+        )
+
+    async def move_body(
+        self,
+        body: int = 0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copy: bool = False,
+        copies: int = 1,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Body move/copy through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "move_body",
+            lambda: self.adapter.move_body(body, dx, dy, dz, copy, copies),
+            input_dict={
+                "body": body,
+                "dx": dx,
+                "dy": dy,
+                "dz": dz,
+                "copy": copy,
+                "copies": copies,
+            },
+        )
+
+    async def delete_body(
+        self, bodies: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Body deletion through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "delete_body",
+            lambda: self.adapter.delete_body(bodies),
+            input_dict={"bodies": bodies},
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation through circuit breaker."""
         return await self._execute_with_circuit_breaker(

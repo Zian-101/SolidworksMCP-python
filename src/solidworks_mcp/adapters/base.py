@@ -1143,6 +1143,72 @@ class SolidWorksAdapter(ABC):
             error="pattern_circular is not implemented by this adapter",
         )
 
+    async def add_draft(
+        self,
+        angle: float,
+        neutral_face: int = 0,
+        draft_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> "AdapterResult[Any]":
+        """Taper faces by a draft angle.
+
+        Args:
+            angle (float): Draft angle in degrees.
+            neutral_face (int): Index of the face the draft is measured from.
+            draft_faces (list[int] | None): Indices of the faces to taper.
+            outward (bool): Taper outward instead of inward.
+
+        Returns:
+            AdapterResult: Draft details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_draft is not implemented by this adapter",
+        )
+
+    async def move_body(
+        self,
+        body: int = 0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copy: bool = False,
+        copies: int = 1,
+    ) -> "AdapterResult[Any]":
+        """Translate or copy a solid body.
+
+        Args:
+            body (int): Body index.
+            dx (float): X offset in millimetres.
+            dy (float): Y offset in millimetres.
+            dz (float): Z offset in millimetres.
+            copy (bool): Leave the original and move a copy.
+            copies (int): Number of copies when ``copy`` is set.
+
+        Returns:
+            AdapterResult: Move details, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="move_body is not implemented by this adapter",
+        )
+
+    async def delete_body(
+        self, bodies: list[int] | None = None
+    ) -> "AdapterResult[Any]":
+        """Delete solid bodies from a multibody part.
+
+        Args:
+            bodies (list[int] | None): Body indices to delete.
+
+        Returns:
+            AdapterResult: Remaining body count, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="delete_body is not implemented by this adapter",
+        )
+
     async def get_bounding_box(self) -> "AdapterResult[Any]":
         """Measure the axis-aligned bounding box of the model's solid bodies.
 

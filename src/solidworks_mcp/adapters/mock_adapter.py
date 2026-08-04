@@ -1686,6 +1686,125 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["sketch_operation"] / 2,
         )
 
+    async def add_draft(
+        self,
+        angle: float,
+        neutral_face: int = 0,
+        draft_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock draft.
+
+        Args:
+            angle (float): Draft angle in degrees.
+            neutral_face (int): Neutral face index.
+            draft_faces (list[int] | None): Face indices to taper.
+            outward (bool): Taper outward instead of inward.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Draft payload.
+        """
+        faces = list(draft_faces or [])
+        if not angle:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="add_draft requires a non-zero angle",
+            )
+        if not faces:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="add_draft requires at least one face index to draft",
+            )
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Draft{random.randint(1, 99)}",
+                "angle": angle,
+                "neutral_face": neutral_face,
+                "draft_faces": faces,
+                "outward": outward,
+                "volume_change": -1.0e-6 if not outward else 1.0e-6,
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
+    async def move_body(
+        self,
+        body: int = 0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copy: bool = False,
+        copies: int = 1,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock body move/copy.
+
+        Args:
+            body (int): Body index.
+            dx (float): X offset in millimetres.
+            dy (float): Y offset in millimetres.
+            dz (float): Z offset in millimetres.
+            copy (bool): Leave the original and move a copy.
+            copies (int): Number of copies when ``copy`` is set.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Move payload.
+        """
+        if not (dx or dy or dz):
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="move_body requires a non-zero offset",
+            )
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Body-Move/Copy{random.randint(1, 99)}",
+                "body": body,
+                "offset": {"x": dx, "y": dy, "z": dz},
+                "copy": copy,
+                "copies": copies if copy else 0,
+                "bodies_after": 2 + (copies if copy else 0),
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
+    async def delete_body(
+        self, bodies: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Mock body deletion.
+
+        Args:
+            bodies (list[int] | None): Body indices to delete.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: Deletion payload.
+        """
+        targets = list(bodies or [])
+        if not targets:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="delete_body requires at least one body index",
+            )
+
+        await asyncio.sleep(self._delays["feature_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "name": f"Body-Delete{random.randint(1, 99)}",
+                "deleted": targets,
+                "bodies_before": len(targets) + 1,
+                "bodies_after": 1,
+            },
+            execution_time=self._delays["feature_operation"],
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Mock reference axis creation.
 

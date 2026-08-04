@@ -550,6 +550,91 @@ class PatternCircularInput(CompatInput):
             raise ValueError("angle must be non-zero")
 
 
+class AddDraftInput(CompatInput):
+    """Input schema for tapering faces with a draft angle.
+
+    Attributes:
+        angle (float): Draft angle in degrees.
+        neutral_face (int): Index of the face the draft is measured from.
+        draft_faces (list[int]): Indices of the faces to taper.
+        outward (bool): Taper outward instead of inward.
+    """
+
+    angle: float = Field(description="Draft angle in degrees")
+    neutral_face: int = Field(
+        default=0,
+        description=(
+            "Index of the face the draft is measured from. Must be "
+            "perpendicular to the faces being drafted - typically the cap the "
+            "feature was extruded from"
+        ),
+    )
+    draft_faces: list[int] = Field(
+        default_factory=list, description="Indices of the faces to taper"
+    )
+    outward: bool = Field(
+        default=False, description="Taper outward (adds material) instead of inward"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.angle:
+            raise ValueError("angle must be non-zero")
+        if not self.draft_faces:
+            raise ValueError("draft_faces must contain at least one face index")
+        if self.neutral_face in self.draft_faces:
+            raise ValueError(
+                "neutral_face cannot also be listed in draft_faces"
+            )
+
+
+class MoveBodyInput(CompatInput):
+    """Input schema for translating or copying a solid body.
+
+    Attributes:
+        body (int): Body index.
+        dx (float): X offset in millimetres.
+        dy (float): Y offset in millimetres.
+        dz (float): Z offset in millimetres.
+        make_copy (bool): Leave the original in place and move a copy.
+        copies (int): Number of copies when make_copy is set.
+    """
+
+    body: int = Field(default=0, description="Body index (see get_bounding_box)")
+    dx: float = Field(default=0.0, description="X offset in millimetres")
+    dy: float = Field(default=0.0, description="Y offset in millimetres")
+    dz: float = Field(default=0.0, description="Z offset in millimetres")
+    # Named make_copy rather than copy: a field called "copy" shadows
+    # BaseModel.copy and Pydantic warns about it.
+    make_copy: bool = Field(
+        default=False, description="Leave the original in place and move a copy"
+    )
+    copies: int = Field(
+        default=1, description="Number of copies when make_copy is set"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not (self.dx or self.dy or self.dz):
+            raise ValueError("at least one of dx, dy, dz must be non-zero")
+        if self.make_copy and self.copies < 1:
+            raise ValueError("copies must be >= 1 when make_copy is set")
+
+
+class DeleteBodyInput(CompatInput):
+    """Input schema for deleting solid bodies.
+
+    Attributes:
+        bodies (list[int]): Body indices to delete.
+    """
+
+    bodies: list[int] = Field(
+        default_factory=list, description="Indices of the bodies to delete"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.bodies:
+            raise ValueError("bodies must contain at least one body index")
+
+
 class CreateAxisInput(CompatInput):
     """Input schema for creating a reference axis.
 
@@ -1450,6 +1535,155 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in pattern_linear tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def add_draft(input_data: AddDraftInput) -> dict[str, Any]:
+        """Taper faces by a draft angle.
+
+        Creates a Draft feature — the taper that lets a moulded part release from its
+        tool. ``neutral_face`` is the face the angle is measured from and **must be
+        perpendicular to the faces being tapered**; drafting a face against its own
+        opposite face does nothing and is reported as an error.
+
+        Faces are addressed by index because SolidWorks exposes no way to list face
+        names here. Indices are stable for a given model.
+
+        Args:
+            input_data (AddDraftInput): Angle, neutral face, faces to taper.
+
+        Returns:
+            dict[str, Any]: Status and draft details, including the volume change.
+
+        Example:
+            ```python
+            # 5 degrees on the four sides of a block, measured from its top face
+            await add_draft({
+                "angle": 5.0,
+                "neutral_face": 4,
+                "draft_faces": [0, 1, 2, 3],
+            })
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, AddDraftInput)
+            result = await adapter.add_draft(
+                input_data.angle,
+                input_data.neutral_face,
+                input_data.draft_faces,
+                input_data.outward,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Drafted {len(input_data.draft_faces)} face(s) at "
+                        f"{input_data.angle} degrees"
+                    ),
+                    "draft": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to add draft: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in add_draft tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def move_body(input_data: MoveBodyInput) -> dict[str, Any]:
+        """Translate a solid body, or place copies of it.
+
+        Creates a Body-Move/Copy feature. A translation does not change the model's
+        volume, so this tool verifies the move by checking that a body actually ends
+        up at the requested destination — a move applied at the wrong scale is caught
+        rather than reported as success.
+
+        Bodies are addressed by index, ordered by position so an index means the same
+        body between calls.
+
+        Args:
+            input_data (MoveBodyInput): Body index, offset, copy options.
+
+        Returns:
+            dict[str, Any]: Status and move details.
+
+        Example:
+            ```python
+            # Shift body 1 by 40 mm along +x
+            await move_body({"body": 1, "dx": 40.0})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, MoveBodyInput)
+            result = await adapter.move_body(
+                input_data.body,
+                input_data.dx,
+                input_data.dy,
+                input_data.dz,
+                input_data.make_copy,
+                input_data.copies,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Moved body {input_data.body} by "
+                        f"({input_data.dx}, {input_data.dy}, {input_data.dz}) mm"
+                    ),
+                    "move": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to move body: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in move_body tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def delete_body(input_data: DeleteBodyInput) -> dict[str, Any]:
+        """Delete solid bodies from a multibody part.
+
+        Creates a Body-Delete feature. Refuses to delete every body, since that would
+        leave the part with no solid. Success is confirmed by the body count actually
+        dropping.
+
+        Args:
+            input_data (DeleteBodyInput): Body indices to delete.
+
+        Returns:
+            dict[str, Any]: Status and the remaining body count.
+
+        Example:
+            ```python
+            await delete_body({"bodies": [1]})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, DeleteBodyInput)
+            result = await adapter.delete_body(input_data.bodies)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Deleted {len(input_data.bodies)} body(ies), "
+                        f"{data.get('bodies_after', '?')} remaining"
+                    ),
+                    "delete": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to delete body: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in delete_body tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

@@ -106,6 +106,31 @@ class SolidWorksFeaturesMixin:
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         return _create_axis_impl(self, reference)
 
+    async def add_draft(
+        self,
+        angle: float,
+        neutral_face: int = 0,
+        draft_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _add_draft_impl(self, angle, neutral_face, draft_faces or [], outward)
+
+    async def move_body(
+        self,
+        body: int = 0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copy: bool = False,
+        copies: int = 1,
+    ) -> AdapterResult[dict[str, Any]]:
+        return _move_body_impl(self, body, dx, dy, dz, copy, copies)
+
+    async def delete_body(
+        self, bodies: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        return _delete_body_impl(self, bodies or [])
+
     async def pattern_circular(
         self,
         features: list[str],
@@ -996,6 +1021,457 @@ def _body_faces(adapter: Any) -> list[Any]:
         return []
     faces = adapter._attempt(lambda: bodies[0].GetFaces(), default=None)
     return list(faces) if isinstance(faces, (list, tuple)) else []
+
+
+def _solid_bodies(adapter: Any) -> list[Any]:
+    """Return every solid body in the active part, in a stable order.
+
+    ``IModelDocExtension::GetBodies2`` returns ``None`` on this build, so the
+    ``IPartDoc`` variant is tried first with the extension as fallback.
+
+    **The order SolidWorks returns is not stable** — measured live, two
+    identical builds of the same part handed back the bodies in opposite
+    order.  Since callers address bodies by index, they are sorted by their
+    bounding-box minimum corner so an index means the same body every time.
+
+    Args:
+        adapter: A connected adapter with a valid ``currentModel``.
+
+    Returns:
+        list[Any]: Body COM objects sorted by position, empty when the part
+        holds no solid.
+    """
+    model = adapter.currentModel
+    bodies = adapter._attempt(lambda: model.GetBodies2(0, True), default=None)
+    if not isinstance(bodies, (list, tuple)) or not bodies:
+        bodies = adapter._attempt(
+            lambda: model.Extension.GetBodies2(0, True), default=None
+        )
+    if not isinstance(bodies, (list, tuple)):
+        return []
+
+    def _corner(body: Any) -> tuple[float, float, float]:
+        """Sort key: the body's minimum bounding-box corner."""
+        box = adapter._attempt(lambda b=body: b.GetBodyBox(), default=None)
+        if not isinstance(box, (list, tuple)) or len(box) < 6:
+            return (0.0, 0.0, 0.0)
+        return (float(box[0]), float(box[1]), float(box[2]))
+
+    return sorted(bodies, key=_corner)
+
+
+def _select_body(adapter: Any, body: Any, mark: int, append: bool) -> bool:
+    """Select a solid body under a selection mark.
+
+    ``IBody2::Select2``'s second parameter is a *SelectData object*, not a
+    mark — passing an integer there silently returns ``False``.  The older
+    ``IBody2::Select(Append, Mark)`` does take a mark, and the body must be
+    flagged for ``IBody2`` first or late binding resolves ``Select`` to a
+    value instead of a method.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        body: The body COM object.
+        mark: Selection mark.
+        append: Add to the current selection instead of replacing it.
+
+    Returns:
+        bool: True when the body was selected.
+    """
+    from solidworks_mcp.adapters import sw_type_info
+
+    flagged = sw_type_info.flagged(body, "IBody2")
+    return bool(
+        adapter._attempt(lambda: flagged.Select(append, mark), default=False)
+    )
+
+
+def _add_draft_impl(
+    adapter: Any,
+    angle: float,
+    neutral_face: int,
+    draft_faces: list[int],
+    outward: bool,
+) -> AdapterResult[dict[str, Any]]:
+    """Apply a draft angle to one or more faces.
+
+    Wraps ``IFeatureManager::InsertMultiFaceDraft(Angle, FlipDir, EdgeDraft,
+    PropType, IsStepDraft, IsBodyDraft)``.  Selection marks: the **neutral
+    plane is mark 1** and each **face to draft is mark 2**.
+
+    Faces are addressed by index into :func:`_body_faces` because SolidWorks
+    exposes no way to enumerate face *names* through this adapter — the same
+    approach ``create_shell`` uses.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        angle: Draft angle in **degrees**.
+        neutral_face: Index of the face the draft is measured from.
+        draft_faces: Indices of the faces to taper.
+        outward: Draft outward instead of inward.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Draft details on success; ``ERROR`` when
+        an index is out of range, selection fails, or the volume is unchanged.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # 5 degrees on face 2, measured from face 0
+        await adapter.add_draft(5.0, 0, [2])
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+    if not angle:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_draft requires a non-zero angle",
+        )
+    if not draft_faces:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_draft requires at least one face index to draft",
+        )
+
+    def _draft_operation() -> dict[str, Any]:
+        """Inner COM closure: select neutral + draft faces, then draft."""
+        import math
+
+        volume_before = _model_volume(adapter)
+
+        faces = _body_faces(adapter)
+        if not faces:
+            raise Exception("No solid body found to draft")
+
+        for label, index in [("neutral_face", neutral_face), *(
+            ("draft_faces", i) for i in draft_faces
+        )]:
+            if index < 0 or index >= len(faces):
+                raise Exception(
+                    f"{label} index {index} out of range - the body has "
+                    f"{len(faces)} faces (0-{len(faces) - 1})"
+                )
+        if neutral_face in draft_faces:
+            raise Exception(
+                f"Face {neutral_face} cannot be both the neutral plane and a "
+                "face to draft"
+            )
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+
+        if not adapter._attempt(
+            lambda: faces[neutral_face].Select2(False, 1), default=False
+        ):
+            raise Exception(f"Failed to select neutral face {neutral_face}")
+
+        for index in draft_faces:
+            if not adapter._attempt(
+                lambda i=index: faces[i].Select2(True, 2), default=False
+            ):
+                raise Exception(f"Failed to select face to draft: {index}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.InsertMultiFaceDraft(
+            math.radians(float(angle)),  # Angle
+            # FlipDir is inverted relative to the name: measured live, FlipDir
+            # True tapers the faces *inward* (60x40x20 block, 10 degrees,
+            # 48000 -> 41278.6 mm3) and False tapers them outward
+            # (48000 -> 55384.7 mm3).
+            bool(not outward),  # FlipDir
+            False,  # EdgeDraft
+            0,  # PropType (neutral plane)
+            False,  # IsStepDraft
+            False,  # IsBodyDraft
+        )
+
+        volume_after = _model_volume(adapter)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            volume_after = _model_volume(adapter, rebuild=True)
+        if volume_before and abs(volume_after - volume_before) <= volume_before * 0.0005:
+            raise Exception(
+                "Draft produced no geometry change "
+                f"(volume before={volume_before:.4g}, after={volume_after:.4g}). "
+                "Check that the neutral face is perpendicular to the faces "
+                "being drafted."
+            )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"), default="Draft"
+                )
+                if feature
+                else "Draft"
+            ),
+            "angle": float(angle),
+            "neutral_face": neutral_face,
+            "draft_faces": list(draft_faces),
+            "outward": bool(outward),
+            "volume_change": volume_after - volume_before,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("add_draft", _draft_operation),
+    )
+
+
+def _move_body_impl(
+    adapter: Any,
+    body: int,
+    dx: float,
+    dy: float,
+    dz: float,
+    copy: bool,
+    copies: int,
+) -> AdapterResult[dict[str, Any]]:
+    """Translate (or copy) a solid body.
+
+    Wraps ``IFeatureManager::InsertMoveCopyBody2(TransX, TransY, TransZ,
+    TransDist, RotPointX..Z, RotAngleX..Z, BCopy, NumCopies)`` with the body
+    preselected under mark 1.  ``TransX/Y/Z`` is a *direction*, with
+    ``TransDist`` the distance along it, so the offset is split into a unit
+    vector plus a magnitude.
+
+    A pure translation is used — rotation angles are all zero.  Success is
+    proved by the bounding box shifting, since a move changes position but not
+    volume, so the usual volume guard cannot see it.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        body: Index into :func:`_solid_bodies`.
+        dx: X offset in millimetres.
+        dy: Y offset in millimetres.
+        dz: Z offset in millimetres.
+        copy: Leave the original in place and move a copy.
+        copies: Number of copies when ``copy`` is set.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Move details on success; ``ERROR`` when
+        the index is out of range, the offset is zero, or nothing moved.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        # Shift body 1 by 30 mm along +x
+        await adapter.move_body(1, 30.0, 0.0, 0.0)
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+
+    distance = (dx * dx + dy * dy + dz * dz) ** 0.5
+    if distance < 1e-9:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="move_body requires a non-zero offset",
+        )
+    if copy and copies < 1:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="move_body requires copies >= 1 when copy is set",
+        )
+
+    def _move_operation() -> dict[str, Any]:
+        """Inner COM closure: select the body, then move it."""
+        bodies = _solid_bodies(adapter)
+        if body < 0 or body >= len(bodies):
+            raise Exception(
+                f"body index {body} out of range - the part has {len(bodies)} "
+                f"bodies (0-{len(bodies) - 1})"
+            )
+
+        box_before = _body_box(adapter, bodies[body])
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+        if not _select_body(adapter, bodies[body], 1, append=False):
+            raise Exception(f"Failed to select body {body}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.InsertMoveCopyBody2(
+            # TransX/Y/Z is the translation *vector* in metres, not a unit
+            # direction: measured live, TransX=1.0 with TransDist=0.04 moved
+            # the body 1000 mm, so TransDist is not applied on this build.
+            dx / 1000.0,  # TransX (m)
+            dy / 1000.0,  # TransY (m)
+            dz / 1000.0,  # TransZ (m)
+            distance / 1000.0,  # TransDist (m)
+            0.0,  # RotPointX
+            0.0,  # RotPointY
+            0.0,  # RotPointZ
+            0.0,  # RotAngleX
+            0.0,  # RotAngleY
+            0.0,  # RotAngleZ
+            bool(copy),  # BCopy
+            int(copies) if copy else 0,  # NumCopies
+        )
+
+        # A translation leaves the volume unchanged, so "did the volume move?"
+        # cannot see it at all -- and "did the box change?" would accept a move
+        # of the wrong distance, which is exactly what a mis-scaled TransDist
+        # produces.  Require a body to exist at the requested destination.
+        moved = None
+        if box_before:
+            expected = tuple(
+                round(v + o, 3)
+                for v, o in zip(box_before, (dx, dy, dz, dx, dy, dz))
+            )
+            for candidate in _solid_bodies(adapter):
+                box = _body_box(adapter, candidate)
+                if box and _boxes_match(expected, box):
+                    moved = expected
+                    break
+            if moved is None:
+                raise Exception(
+                    f"Move did not land where asked: no body sits at "
+                    f"{expected} after offsetting ({dx}, {dy}, {dz}) mm from "
+                    f"{box_before}. The body may be fixed, or the offset was "
+                    f"applied at the wrong scale."
+                )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="Body-Move/Copy",
+                )
+                if feature
+                else "Body-Move/Copy"
+            ),
+            "body": body,
+            "offset": {"x": dx, "y": dy, "z": dz},
+            "copy": bool(copy),
+            "copies": int(copies) if copy else 0,
+            "bodies_after": len(_solid_bodies(adapter)),
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("move_body", _move_operation),
+    )
+
+
+def _body_box(adapter: Any, body: Any) -> tuple[float, ...] | None:
+    """Return one body's bounding box in millimetres, or ``None``.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter``.
+        body: The body COM object.
+
+    Returns:
+        tuple[float, ...] | None: ``(minx, miny, minz, maxx, maxy, maxz)``, or
+        ``None`` when ``GetBodyBox`` gives nothing usable.
+    """
+    box = adapter._attempt(lambda: body.GetBodyBox(), default=None)
+    if not isinstance(box, (list, tuple)) or len(box) < 6:
+        return None
+    values = [float(v) * 1000.0 for v in box[:6]]
+    low = [min(values[i], values[i + 3]) for i in range(3)]
+    high = [max(values[i], values[i + 3]) for i in range(3)]
+    return tuple(round(v, 3) for v in (*low, *high))
+
+
+def _boxes_match(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
+    """Compare two bounding boxes with a 1 micron tolerance.
+
+    Args:
+        a: First box.
+        b: Second box.
+
+    Returns:
+        bool: True when every corner matches.
+    """
+    return len(a) == len(b) and all(abs(x - y) < 1e-3 for x, y in zip(a, b))
+
+
+def _delete_body_impl(adapter: Any, bodies: list[int]) -> AdapterResult[dict[str, Any]]:
+    """Delete solid bodies from a multibody part.
+
+    Wraps ``IFeatureManager::InsertDeleteBody2(KeepBodies=False)`` with the
+    bodies preselected under mark 1.
+
+    Args:
+        adapter: A connected ``PyWin32Adapter`` with a valid ``currentModel``.
+        bodies: Indices into :func:`_solid_bodies`.
+
+    Returns:
+        AdapterResult[dict[str, Any]]: Remaining body count on success;
+        ``ERROR`` when an index is out of range or the count did not drop.
+
+    Raises:
+        Exception: Propagated through ``_handle_com_operation``.
+
+    Example::
+
+        await adapter.delete_body([1])
+    """
+    if not adapter.currentModel:
+        return AdapterResult(status=AdapterResultStatus.ERROR, error="No active model")
+    if not bodies:
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="delete_body requires at least one body index",
+        )
+
+    def _delete_body_operation() -> dict[str, Any]:
+        """Inner COM closure: select the bodies, then delete them."""
+        solids = _solid_bodies(adapter)
+        count_before = len(solids)
+        if count_before <= len(bodies):
+            raise Exception(
+                f"Refusing to delete {len(bodies)} of {count_before} bodies - "
+                "that would leave the part with no solid."
+            )
+
+        for index in bodies:
+            if index < 0 or index >= count_before:
+                raise Exception(
+                    f"body index {index} out of range - the part has "
+                    f"{count_before} bodies (0-{count_before - 1})"
+                )
+
+        adapter._attempt(
+            lambda: adapter.currentModel.ClearSelection2(True), default=None
+        )
+        for position, index in enumerate(bodies):
+            if not _select_body(adapter, solids[index], 1, append=position > 0):
+                raise Exception(f"Failed to select body {index}")
+
+        feature_manager = adapter.currentModel.FeatureManager
+        feature = feature_manager.InsertDeleteBody2(False)
+
+        count_after = len(_solid_bodies(adapter))
+        if count_after >= count_before:
+            raise Exception(
+                f"Delete removed nothing - the part still has {count_after} "
+                f"bodies (was {count_before})."
+            )
+
+        return {
+            "name": str(
+                adapter._attempt(
+                    lambda: adapter._get_attr_or_call(feature, "Name"),
+                    default="Body-Delete",
+                )
+                if feature
+                else "Body-Delete"
+            ),
+            "deleted": list(bodies),
+            "bodies_before": count_before,
+            "bodies_after": count_after,
+        }
+
+    return cast(
+        AdapterResult[dict[str, Any]],
+        adapter._handle_com_operation("delete_body", _delete_body_operation),
+    )
 
 
 def _create_shell_impl(

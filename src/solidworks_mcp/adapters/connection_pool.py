@@ -695,6 +695,44 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             ),
         )
 
+    async def add_draft(
+        self,
+        angle: float,
+        neutral_face: int = 0,
+        draft_faces: list[int] | None = None,
+        outward: bool = False,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Draft using pool."""
+        return await self._execute_with_pool(
+            "add_draft",
+            lambda adapter: adapter.add_draft(
+                angle, neutral_face, draft_faces, outward
+            ),
+        )
+
+    async def move_body(
+        self,
+        body: int = 0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        dz: float = 0.0,
+        copy: bool = False,
+        copies: int = 1,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Body move/copy using pool."""
+        return await self._execute_with_pool(
+            "move_body",
+            lambda adapter: adapter.move_body(body, dx, dy, dz, copy, copies),
+        )
+
+    async def delete_body(
+        self, bodies: list[int] | None = None
+    ) -> AdapterResult[dict[str, Any]]:
+        """Body deletion using pool."""
+        return await self._execute_with_pool(
+            "delete_body", lambda adapter: adapter.delete_body(bodies)
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation using pool."""
         return await self._execute_with_pool(
