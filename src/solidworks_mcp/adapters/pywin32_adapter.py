@@ -1210,10 +1210,29 @@ class _FeatureSelectionService:
         features: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
 
-        feature = self._adapter._attempt(
-            lambda: self._adapter.currentModel.FirstFeature()
+        # ``FirstFeature`` / ``GetNextFeature`` may come back from pywin32's
+        # late binding either as a bound method (needing a call) or as the
+        # already-resolved value.  Calling unconditionally used to abort the
+        # walk after the first entry, so ``list_features`` reported only the
+        # "Comments" folder and none of the real model features.
+        def _member(obj: Any, name: str) -> Any:
+            attr = getattr(obj, name, None)
+            if attr is None or not callable(attr):
+                return attr
+            try:
+                return attr()
+            except Exception:
+                return attr
+
+        self._adapter._attempt(
+            lambda: sw_type_info.flag_methods(
+                self._adapter.currentModel, "IModelDoc2"
+            ),
+            default=0,
         )
-        # Flag the feature dispatch so methods like GetNextFeature work
+        feature = self._adapter._attempt(
+            lambda: _member(self._adapter.currentModel, "FirstFeature")
+        )
         if feature is not None:
             self._adapter._attempt(
                 lambda f=feature: sw_type_info.flag_methods(f, "IFeature"), default=0
@@ -1225,7 +1244,9 @@ class _FeatureSelectionService:
             pos += 1
             guard += 1
             next_feature = self._adapter._attempt(
-                lambda current_feature=feature: current_feature.GetNextFeature()
+                lambda current_feature=feature: _member(
+                    current_feature, "GetNextFeature"
+                )
             )
             if next_feature is None:
                 break
@@ -1278,9 +1299,21 @@ class _FeatureSelectionService:
             position: Display position index.
             include_suppressed: Include suppressed entries when ``True``.
         """
-        name = str(getattr(feature, "Name", ""))
+        def _member(obj: Any, member_name: str) -> Any:
+            attr = getattr(obj, member_name, None)
+            if attr is None or not callable(attr):
+                return attr
+            try:
+                return attr()
+            except Exception:
+                return attr
+
+        name = str(self._adapter._attempt(lambda: _member(feature, "Name"), default="") or "")
         feature_type = str(
-            self._adapter._attempt(lambda: feature.GetTypeName2(), default="Unknown")
+            self._adapter._attempt(
+                lambda: _member(feature, "GetTypeName2"), default="Unknown"
+            )
+            or "Unknown"
         )
         dedupe_key = (name, feature_type)
         if dedupe_key in seen:
