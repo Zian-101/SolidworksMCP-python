@@ -4,6 +4,8 @@ Provides tools for managing SolidWorks files including save, save as, file prope
 and reference management.
 """
 
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -461,20 +463,57 @@ async def register_file_management_tools(
                             - Some properties may be empty if not set
                             - Technical properties depend on document configuration
         """
-        # Simulated file properties - would get from adapter
-        return {
-            "status": "success",
-            "properties": {
-                "file_name": "Example.sldprt",
-                "file_size": "2.5 MB",
-                "created_date": "2024-03-14T00:00:00Z",
-                "modified_date": "2024-03-14T12:00:00Z",
-                "author": "User",
-                "description": "SolidWorks part file",
-                "material": "Default",
-                "units": "millimeters",
-            },
-        }
+        try:
+            info = await adapter.get_model_info()
+            if not info.is_success:
+                return {
+                    "status": "error",
+                    "message": f"Failed to read active document: {info.error}",
+                }
+
+            data = info.data if isinstance(info.data, dict) else {}
+            path_text = str(data.get("path") or "")
+
+            properties: dict[str, Any] = {
+                "file_name": data.get("name") or data.get("title"),
+                "file_path": path_text or None,
+                "document_type": data.get("type"),
+                "configuration": data.get("configuration"),
+                "feature_count": data.get("feature_count"),
+            }
+
+            # Real filesystem metadata when the document has been saved.
+            if path_text:
+                file_path = Path(path_text)
+                if file_path.exists():
+                    stat = file_path.stat()
+                    properties["file_size_bytes"] = stat.st_size
+                    properties["file_size"] = f"{stat.st_size / (1024 * 1024):.2f} MB"
+                    properties["modified_date"] = datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat()
+                    properties["created_date"] = datetime.fromtimestamp(
+                        stat.st_ctime, tz=timezone.utc
+                    ).isoformat()
+                else:
+                    properties["note"] = "Document path is not on disk (unsaved?)"
+            else:
+                properties["note"] = "Document has not been saved to disk yet"
+
+            # Mass properties are the honest source for material-ish data.
+            mass = await adapter.get_mass_properties()
+            if mass.is_success and mass.data is not None:
+                properties["volume_mm3"] = getattr(mass.data, "volume", None)
+                properties["mass_kg"] = getattr(mass.data, "mass", None)
+
+            return {
+                "status": "success",
+                "properties": {k: v for k, v in properties.items() if v is not None},
+            }
+
+        except Exception as e:
+            logger.error(f"Error in get_file_properties tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def get_model_info() -> dict[str, Any]:
