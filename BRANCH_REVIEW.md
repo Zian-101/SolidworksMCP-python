@@ -33,6 +33,7 @@ closes those gaps.
 | `bb4b023` | Circular pattern + reference axis; patterns verify instance count |
 | `c885a92` | Draft, move/copy body, delete body |
 | `88099d4` | Auto-reconnect on stale COM; `create_assembly` stops overclaiming |
+| `8af1a20` | `set_material`, `scale_model`, `delete_face`; material readback fixed |
 
 ---
 
@@ -48,6 +49,7 @@ closes those gaps.
 | `check_interference` | Always `interference_found: False` **without checking** | Real `ToolsCheckInterference2`; refuses non-assembly docs with a reason |
 | `analyze_geometry` | Always `findings: ["No issues found"]` for any analysis type | Measures bounding box / volume; rejects unsupported types explicitly |
 | `get_material_properties` | Hardcoded plain-carbon-steel for every model | Real material name; density derived from the model's own mass and volume |
+| `get_material_properties` (again) | Always reported `assigned: false` — the out-parameter needed a byref VARIANT, so the name was always `None` | Reads the material and its library correctly |
 
 ## Added (did not exist)
 
@@ -60,6 +62,8 @@ rebuilding from scratch
 `pattern_circular` · `create_axis` — a fresh part has no axis to rotate about,
 so the axis tool ships with the pattern or the pattern is unusable
 `add_draft` · `move_body` · `delete_body` — the first body-level edits
+`set_material` · `scale_model` · `delete_face` — material makes mass properties
+mean something instead of defaulting to 1000 kg/m³
 
 ## Infrastructure
 
@@ -128,7 +132,14 @@ invalidation, so caching them serves stale values mid-build.
     dangling-pointer scenario cannot be produced without killing a live
     SolidWorks session. The detector, retry, bounded-attempt and
     recursion-guard paths are all covered.
-11. **Three APIs were tried and deliberately not shipped**, because each
+11. **Wrong-overload hazard is real and silent.** `InsertScale` exists on both
+    `IModelDoc2` *and* `IFeatureManager` with **different arity and argument
+    order**; the document version is `(x, y, z, isUniform)`, so calling it with
+    the FeatureManager arguments passes `0` as the X factor and quietly does
+    nothing. Likewise `DeleteFaces2` is on `IBody2`, not `FeatureManager`, and
+    `InsertMoveFace` is on `FeatureManager`, not `IModelDoc2`. Always confirm
+    the owning interface in `gen_py`, not just the method name.
+12. **Four APIs were tried and deliberately not shipped**, because each
     returns success-shaped nothing on this build and shipping them would mean
     shipping tools that never work:
     - `InsertCombineFeature` (boolean add/subtract/intersect) — reachable as a
@@ -140,8 +151,18 @@ invalidation, so caching them serves stale values mid-build.
       options 0–2), `AddComponents3` and `AddComponent` all return `None` and
       leave the component count at zero, before and after saving the assembly,
       with the part loaded and the assembly reactivated.
-12. **Untouched:** rib, hole wizard, split/move-face, appearance and material
-    assignment, live mating.
+    - `InsertMoveFace` / `InsertMoveFace2` / `InsertMoveFace3` (direct face
+      offset) — all return `None` and change nothing, across move types 0–2
+      and both directions, with the face demonstrably selected.
+    - `InsertRib` / `InsertRib2` — the `IModelDoc2` overload takes the
+      arguments without complaint and produces no geometry; the
+      `IFeatureManager` one wants a tenth argument and still produces none.
+      A bad sketch setup cannot be ruled out here.
+13. **A pattern worth noting:** feature-creation calls on `IFeatureManager`
+    work (extrude, cut, revolve, fillet, shell, patterns, draft, scale,
+    move/delete body). The *direct-editing* and assembly APIs — combine, move
+    face, component insert — consistently return nothing on this build.
+14. **Untouched:** hole wizard, split body, appearance, live mating.
 
 ---
 
