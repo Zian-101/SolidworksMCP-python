@@ -77,6 +77,23 @@ _STALE_COM_MARKERS = (
 )
 
 
+def _byref_long() -> Any:
+    """Return a byref long VARIANT for a SolidWorks out-parameter.
+
+    ``OpenDoc6`` returns ``None`` when its ``errors``/``warnings`` parameters
+    are passed as ``pythoncom.Missing``; a byref VARIANT works.
+
+    Returns:
+        Any: A ``VARIANT(VT_BYREF | VT_I4, 0)``, or ``0`` without pywin32.
+    """
+    variant_ctor = getattr(getattr(win32com, "client", None), "VARIANT", None)
+    if not callable(variant_ctor):
+        return 0
+    return variant_ctor(
+        int(getattr(pythoncom, "VT_BYREF", 0)) | int(getattr(pythoncom, "VT_I4", 0)), 0
+    )
+
+
 def _is_stale_com(error: BaseException) -> bool:
     """Report whether an exception means the SolidWorks handle is dead.
 
@@ -1785,14 +1802,45 @@ class PyWin32Adapter(
             self.swApp = app
             self._attempt(lambda: sw_type_info.flag_methods(app, "ISldWorks"))
 
-            # The document pointer is stale for exactly the same reason.
-            model = self._attempt(lambda: app.ActiveDoc, default=None)
-            if model is not None:
-                doc_type = self._attempt(
-                    lambda: self._get_attr_or_call(model, "GetType"), default=None
+            # The document pointer is stale for exactly the same reason.  Take
+            # care to restore the document the caller was actually working on:
+            # falling back to whatever happens to be ActiveDoc silently
+            # redirects every later operation at a different model, which is
+            # far worse than failing.
+            model = None
+            path = getattr(self, "_active_doc_path", None)
+            if path and os.path.exists(path):
+                lowered = path.lower()
+                doc_type = (
+                    2
+                    if lowered.endswith(".sldasm")
+                    else 3
+                    if lowered.endswith(".slddrw")
+                    else 1
                 )
-                if isinstance(doc_type, int):
+                model = self._attempt(
+                    lambda: app.OpenDoc6(
+                        path, doc_type, 1, "", _byref_long(), _byref_long()
+                    ),
+                    default=None,
+                )
+                if model is not None:
                     self._attempt(lambda: sw_type_info.flag_doc(model, doc_type))
+
+            if model is None:
+                model = self._attempt(lambda: app.ActiveDoc, default=None)
+                if model is not None:
+                    doc_type = self._attempt(
+                        lambda: self._get_attr_or_call(model, "GetType"), default=None
+                    )
+                    if isinstance(doc_type, int):
+                        self._attempt(lambda: sw_type_info.flag_doc(model, doc_type))
+                    if path:
+                        logger.warning(
+                            f"[pywin32.{operation_name}] could not reopen "
+                            f"'{path}' after reconnect; falling back to the "
+                            "active document"
+                        )
             self.currentModel = model
 
             self._reconnect_attempts = 0

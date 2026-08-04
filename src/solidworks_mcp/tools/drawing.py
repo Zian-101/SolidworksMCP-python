@@ -396,20 +396,27 @@ async def register_drawing_tools(
                             - Multiple views can reference the same model file
         """
         try:
-            # For now, simulate drawing view creation
+            result = await adapter.add_drawing_view(
+                input_data.model_path,
+                input_data.orientation,
+                input_data.position_x,
+                input_data.position_y,
+                input_data.scale if input_data.scale and input_data.scale != 1.0 else 0.0,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Created {data.get('name', 'view')} of "
+                        f"{input_data.model_path}"
+                    ),
+                    "drawing_view": data,
+                    "execution_time": result.execution_time,
+                }
             return {
-                "status": "success",
-                "message": f"Created {input_data.view_type} view of {input_data.model_path}",
-                "drawing_view": {
-                    "model_path": input_data.model_path,
-                    "view_type": input_data.view_type,
-                    "position": {
-                        "x": input_data.position_x,
-                        "y": input_data.position_y,
-                    },
-                    "scale": input_data.scale,
-                    "orientation": input_data.orientation,
-                },
+                "status": "error",
+                "message": f"Failed to create drawing view: {result.error}",
             }
 
         except Exception as e:
@@ -418,6 +425,74 @@ async def register_drawing_tools(
                 "status": "error",
                 "message": f"Unexpected error: {str(e)}",
             }
+
+    @mcp.tool()
+    async def create_standard_views(input_data: dict[str, Any]) -> dict[str, Any]:
+        """Drop the three standard views of a model onto the active drawing sheet.
+
+        Lays out front, top and side in one call — the fastest way to start a drawing.
+        Requires an active drawing document (call ``create_drawing`` first) and a model
+        with real solid geometry.
+
+        Args:
+            input_data (dict[str, Any]): ``model_path`` and optional ``third_angle``.
+
+        Returns:
+            dict[str, Any]: Status and the view names that were created.
+
+        Example:
+            ```python
+            await create_standard_views({"model_path": "C:/parts/bracket.sldprt"})
+            ```
+        """
+        try:
+            model_path = str(input_data.get("model_path", "")).strip()
+            if not model_path:
+                return {"status": "error", "message": "model_path is required"}
+            third_angle = bool(input_data.get("third_angle", True))
+
+            result = await adapter.create_standard_views(model_path, third_angle)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                views = data.get("views", []) if isinstance(data, dict) else []
+                return {
+                    "status": "success",
+                    "message": f"Created {len(views)} standard views",
+                    "standard_views": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to create standard views: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in create_standard_views tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def list_drawing_views() -> dict[str, Any]:
+        """List the views on the active drawing.
+
+        Returns:
+            dict[str, Any]: Status and the view names.
+        """
+        try:
+            result = await adapter.list_drawing_views()
+            if result.is_success:
+                views = result.data if isinstance(result.data, list) else []
+                return {
+                    "status": "success",
+                    "message": f"{len(views)} view(s) on the drawing",
+                    "views": views,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to list drawing views: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in list_drawing_views tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def add_dimension(input_data: AddDimensionInput) -> dict[str, Any]:
@@ -498,18 +573,24 @@ async def register_drawing_tools(
                     "message": result.error or "Failed to add dimension",
                 }
 
-            # For now, simulate dimension creation
+            # Deliberately an error rather than an invented dimension.
+            # Placing one needs the two drawing entities selected by name, and
+            # this adapter cannot enumerate drawing entity names, so there is
+            # no honest way to satisfy the request.
             return {
-                "status": "success",
-                "message": f"Added {dimension_type} dimension",
-                "dimension": {
+                "status": "error",
+                "message": (
+                    "Placing an individual dimension is not supported: it "
+                    "requires selecting drawing entities, which this adapter "
+                    "cannot enumerate. Use auto_dimension_view to import the "
+                    "model's own dimensions, or add the dimension in the "
+                    "SolidWorks UI."
+                ),
+                "requested": {
                     "type": dimension_type,
                     "entity1": entity1,
                     "entity2": entity2,
-                    "position": {
-                        "x": position_x,
-                        "y": position_y,
-                    },
+                    "position": {"x": position_x, "y": position_y},
                     "precision": precision,
                 },
             }
@@ -559,19 +640,23 @@ async def register_drawing_tools(
                                     - Position carefully to avoid dimension conflicts
         """
         try:
-            # For now, simulate note creation
+            result = await adapter.add_drawing_note(
+                input_data.text,
+                input_data.position_x,
+                input_data.position_y,
+                input_data.font_size or 0.0,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Added note: {input_data.text[:30]}",
+                    "note": data,
+                    "execution_time": result.execution_time,
+                }
             return {
-                "status": "success",
-                "message": f"Added note: {input_data.text[:30]}...",
-                "note": {
-                    "text": input_data.text,
-                    "position": {
-                        "x": input_data.position_x,
-                        "y": input_data.position_y,
-                    },
-                    "font_size": input_data.font_size,
-                    "leader_attachment": input_data.leader_attachment,
-                },
+                "status": "error",
+                "message": f"Failed to add note: {result.error}",
             }
 
         except Exception as e:
@@ -619,20 +704,22 @@ async def register_drawing_tools(
                             - Essential for showing internal features and assemblies
         """
         try:
-            # For now, simulate section view creation
+            # A section view needs a section line sketched on a parent
+            # view first; this adapter cannot create that sketch, so it says so
+            # instead of reporting a view that does not exist.
             return {
-                "status": "success",
-                "message": f"Created section view {input_data.label}",
-                "section_view": {
+                "status": "error",
+                "message": (
+                    "Section views are not supported: SolidWorks needs a "
+                    "section line sketched on a parent view first, which this "
+                    "adapter cannot create. Add the section view in the "
+                    "SolidWorks UI."
+                ),
+                "requested": {
                     "section_line": {
                         "start": input_data.section_line_start,
                         "end": input_data.section_line_end,
                     },
-                    "view_position": {
-                        "x": input_data.view_position_x,
-                        "y": input_data.view_position_y,
-                    },
-                    "scale": input_data.scale,
                     "label": input_data.label,
                 },
             }
@@ -682,20 +769,20 @@ async def register_drawing_tools(
                             - Essential for communicating tight tolerance requirements
         """
         try:
-            # For now, simulate detail view creation
+            # A detail view needs a detail circle sketched on a parent
+            # view first; this adapter cannot create that sketch.
             return {
-                "status": "success",
-                "message": f"Created detail view {input_data.label}",
-                "detail_view": {
+                "status": "error",
+                "message": (
+                    "Detail views are not supported: SolidWorks needs a detail "
+                    "circle sketched on a parent view first, which this adapter "
+                    "cannot create. Add the detail view in the SolidWorks UI."
+                ),
+                "requested": {
                     "detail_circle": {
                         "center": {"x": input_data.center_x, "y": input_data.center_y},
                         "radius": input_data.radius,
                     },
-                    "view_position": {
-                        "x": input_data.view_position_x,
-                        "y": input_data.view_position_y,
-                    },
-                    "scale": input_data.scale,
                     "label": input_data.label,
                 },
             }
@@ -747,20 +834,20 @@ async def register_drawing_tools(
                             - Essential for drawing control and document management systems
         """
         try:
-            # For now, simulate sheet format update
+            # Reported nothing real: the sheet was never touched and the
+            # title-block values were echoed straight back.
             return {
-                "status": "success",
-                "message": f"Updated sheet format to {input_data.sheet_size}",
-                "sheet_format": {
+                "status": "error",
+                "message": (
+                    "Changing the sheet format is not supported by this "
+                    "adapter. Set the sheet format and title block in the "
+                    "SolidWorks UI, or apply a drawing template that already "
+                    "carries them."
+                ),
+                "requested": {
                     "format_file": input_data.format_file,
                     "sheet_size": input_data.sheet_size,
-                    "title_block": {
-                        "title": input_data.title,
-                        "drawn_by": getattr(input_data, "drawn_by", ""),
-                        "checked_by": getattr(input_data, "checked_by", ""),
-                        "approved_by": getattr(input_data, "approved_by", ""),
-                        "drawing_number": getattr(input_data, "drawing_number", ""),
-                    },
+                    "title": input_data.title,
                 },
             }
 
@@ -809,15 +896,24 @@ async def register_drawing_tools(
                             - Significantly reduces manual dimensioning time
         """
         try:
-            # For now, simulate auto-dimensioning
+            # "Auto dimension" in practice means importing the dimensions the
+            # model was built with, rather than inventing new ones.
+            all_views = bool(input_data.get("all_views", True))
+            result = await adapter.insert_model_dimensions(all_views)
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": (
+                        f"Imported {data.get('annotations_inserted', 0)} model "
+                        "dimension(s) onto the drawing"
+                    ),
+                    "auto_dimensions": data,
+                    "execution_time": result.execution_time,
+                }
             return {
-                "status": "success",
-                "message": "Auto-dimensioned drawing view",
-                "auto_dimensions": {
-                    "dimensions_added": 12,
-                    "dimension_types": ["linear", "radial", "diameter"],
-                    "coverage": "85%",
-                },
+                "status": "error",
+                "message": f"Failed to auto-dimension: {result.error}",
             }
 
         except Exception as e:  # pragma: no cover - defensive guard for future logic
@@ -865,23 +961,18 @@ async def register_drawing_tools(
                             - Essential for quality management and ISO certification
         """
         try:
-            # For now, simulate standards checking
+            # This used to return a 92% compliance score and a list of
+            # warnings for a drawing it never opened. A fabricated pass on a
+            # standards check is exactly the kind of answer someone might act
+            # on, so it now refuses.
             return {
-                "status": "success",
-                "message": "Drawing standards check completed",
-                "standards_check": {
-                    "standard": "ANSI Y14.5",
-                    "compliance_score": 92,
-                    "warnings": [
-                        "Missing general tolerance note",
-                        "Some dimensions lack required precision",
-                    ],
-                    "errors": [],
-                    "recommendations": [
-                        "Add material specification",
-                        "Include finish symbols where appropriate",
-                    ],
-                },
+                "status": "error",
+                "message": (
+                    "Drafting-standards checking is not implemented. The "
+                    "previous compliance score and warnings were fabricated "
+                    "and did not reflect the drawing. Use SolidWorks' own "
+                    "Design Checker for a real result."
+                ),
             }
 
         except Exception as e:  # pragma: no cover - defensive guard for future logic

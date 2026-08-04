@@ -860,6 +860,46 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"name": name, "database": database},
         )
 
+    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> AdapterResult[Any]:
+        """Place a view of a model on the active drawing sheet. (circuit breaker)."""
+        return await self._execute_with_circuit_breaker(
+            "add_drawing_view",
+            lambda: self.adapter.add_drawing_view(model_path, orientation, x, y, scale),
+            input_dict={"model_path": model_path, "orientation": orientation, "x": x, "y": y, "scale": scale},
+        )
+
+    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> AdapterResult[Any]:
+        """Drop the three standard views onto the active drawing sheet. (circuit breaker)."""
+        return await self._execute_with_circuit_breaker(
+            "create_standard_views",
+            lambda: self.adapter.create_standard_views(model_path, third_angle),
+            input_dict={"model_path": model_path, "third_angle": third_angle},
+        )
+
+    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> AdapterResult[Any]:
+        """Place a text note on the active drawing sheet. (circuit breaker)."""
+        return await self._execute_with_circuit_breaker(
+            "add_drawing_note",
+            lambda: self.adapter.add_drawing_note(text, x, y, font_size),
+            input_dict={"text": text, "x": x, "y": y, "font_size": font_size},
+        )
+
+    async def insert_model_dimensions(self, all_views: bool = True) -> AdapterResult[Any]:
+        """Import the model's dimensions onto the drawing views. (circuit breaker)."""
+        return await self._execute_with_circuit_breaker(
+            "insert_model_dimensions",
+            lambda: self.adapter.insert_model_dimensions(all_views),
+            input_dict={"all_views": all_views},
+        )
+
+    async def list_drawing_views(self) -> AdapterResult[Any]:
+        """List the views on the active drawing. (circuit breaker)."""
+        return await self._execute_with_circuit_breaker(
+            "list_drawing_views",
+            lambda: self.adapter.list_drawing_views(),
+            input_dict={},
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation through circuit breaker."""
         return await self._execute_with_circuit_breaker(

@@ -758,6 +758,36 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             "set_material", lambda adapter: adapter.set_material(name, database)
         )
 
+    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> AdapterResult[Any]:
+        """Place a view of a model on the active drawing sheet. (pool)."""
+        return await self._execute_with_pool(
+            "add_drawing_view", lambda adapter: adapter.add_drawing_view(model_path, orientation, x, y, scale)
+        )
+
+    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> AdapterResult[Any]:
+        """Drop the three standard views onto the active drawing sheet. (pool)."""
+        return await self._execute_with_pool(
+            "create_standard_views", lambda adapter: adapter.create_standard_views(model_path, third_angle)
+        )
+
+    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> AdapterResult[Any]:
+        """Place a text note on the active drawing sheet. (pool)."""
+        return await self._execute_with_pool(
+            "add_drawing_note", lambda adapter: adapter.add_drawing_note(text, x, y, font_size)
+        )
+
+    async def insert_model_dimensions(self, all_views: bool = True) -> AdapterResult[Any]:
+        """Import the model's dimensions onto the drawing views. (pool)."""
+        return await self._execute_with_pool(
+            "insert_model_dimensions", lambda adapter: adapter.insert_model_dimensions(all_views)
+        )
+
+    async def list_drawing_views(self) -> AdapterResult[Any]:
+        """List the views on the active drawing. (pool)."""
+        return await self._execute_with_pool(
+            "list_drawing_views", lambda adapter: adapter.list_drawing_views()
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Reference axis creation using pool."""
         return await self._execute_with_pool(

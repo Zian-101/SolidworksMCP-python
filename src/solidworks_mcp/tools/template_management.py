@@ -427,7 +427,7 @@ async def register_template_management_tools(
                 },
             }
 
-            similarity_score = 85.5  # Simulated similarity percentage
+            similarity_score = 0.0
 
             comparison_report = {
                 "template1": input_data.template1_path,

@@ -1903,6 +1903,76 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["model_operation"],
         )
 
+    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> AdapterResult[Any]:
+        """Mock: place a view of a model on the active drawing sheet.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"name": "Drawing View1", "model_path": model_path, "orientation": orientation, "position": {"x": x, "y": y}, "scale": scale or None, "views_before": 0, "views_after": 1},
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> AdapterResult[Any]:
+        """Mock: drop the three standard views onto the active drawing sheet.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"views": ["Drawing View1", "Drawing View2", "Drawing View3"], "model_path": model_path, "projection": "third_angle" if third_angle else "first_angle", "views_before": 0, "views_after": 3},
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> AdapterResult[Any]:
+        """Mock: place a text note on the active drawing sheet.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"text": text, "position": {"x": x, "y": y}, "positioned": True, "font_size": font_size or None},
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def insert_model_dimensions(self, all_views: bool = True) -> AdapterResult[Any]:
+        """Mock: import the model's dimensions onto the drawing views.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={"annotations_inserted": 6, "all_views": all_views},
+            execution_time=self._delays["model_operation"],
+        )
+
+    async def list_drawing_views(self) -> AdapterResult[Any]:
+        """Mock: list the views on the active drawing.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data=["Drawing View1", "Drawing View2"],
+            execution_time=self._delays["model_operation"],
+        )
+
     async def create_axis(self, reference: str = "z") -> AdapterResult[dict[str, Any]]:
         """Mock reference axis creation.
 

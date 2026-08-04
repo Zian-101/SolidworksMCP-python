@@ -1260,6 +1260,61 @@ class SolidWorksAdapter(ABC):
             error="set_material is not implemented by this adapter",
         )
 
+    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> "AdapterResult[Any]":
+        """Place a view of a model on the active drawing sheet.
+
+        Returns:
+            AdapterResult: Operation payload, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_drawing_view is not implemented by this adapter",
+        )
+
+    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> "AdapterResult[Any]":
+        """Drop the three standard views onto the active drawing sheet.
+
+        Returns:
+            AdapterResult: Operation payload, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="create_standard_views is not implemented by this adapter",
+        )
+
+    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> "AdapterResult[Any]":
+        """Place a text note on the active drawing sheet.
+
+        Returns:
+            AdapterResult: Operation payload, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="add_drawing_note is not implemented by this adapter",
+        )
+
+    async def insert_model_dimensions(self, all_views: bool = True) -> "AdapterResult[Any]":
+        """Import the model's dimensions onto the drawing views.
+
+        Returns:
+            AdapterResult: Operation payload, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="insert_model_dimensions is not implemented by this adapter",
+        )
+
+    async def list_drawing_views(self) -> "AdapterResult[Any]":
+        """List the views on the active drawing.
+
+        Returns:
+            AdapterResult: Operation payload, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="list_drawing_views is not implemented by this adapter",
+        )
+
     async def get_bounding_box(self) -> "AdapterResult[Any]":
         """Measure the axis-aligned bounding box of the model's solid bodies.
 
