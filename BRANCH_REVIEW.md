@@ -31,6 +31,8 @@ closes those gaps.
 | `59929d5` | Drop redundant rebuilds (~225 ms/op); `get_file_properties` reports the real file |
 | `b9c364c` | Analysis tools measure instead of simulating |
 | `bb4b023` | Circular pattern + reference axis; patterns verify instance count |
+| `c885a92` | Draft, move/copy body, delete body |
+| `88099d4` | Auto-reconnect on stale COM; `create_assembly` stops overclaiming |
 
 ---
 
@@ -57,6 +59,7 @@ rebuilding from scratch
 `get_bounding_box` — overall extents in mm, unioned across solid bodies
 `pattern_circular` · `create_axis` — a fresh part has no axis to rotate about,
 so the axis tool ships with the pattern or the pattern is unusable
+`add_draft` · `move_body` · `delete_body` — the first body-level edits
 
 ## Infrastructure
 
@@ -75,6 +78,13 @@ an apparent "nothing changed" before failing. ~225 ms saved per modeling op.
 is worth (suppress the source feature, re-read volume, unsuppress) and require
 the result to account for `count - 1` of them. The old "did the volume change?"
 guard could not tell 6 instances from 2, and twice only a render caught it.
+
+**Auto-reconnect** — quitting and reopening SolidWorks left a dangling COM
+pointer and every later call failed until the MCP server was restarted by hand.
+The handle is now re-acquired and the operation retried once. Detection covers
+both shapes: the `com_error` HRESULTs *and* the `AttributeError:
+SldWorks.Application.<method>` that late binding actually raises — which is why
+the old `except com_error` branch never caught it.
 
 **Caching** — the analysis tools were in the intelligent router's cacheable
 set. Now that they read live geometry they are excluded, alongside the mass
@@ -114,10 +124,24 @@ invalidation, so caching them serves stale values mid-build.
 9. **Pattern verification costs two suppress/unsuppress cycles** (≈1 s) per
    pattern call. Best-effort: if it fails, the tool falls back to the weaker
    guard and says so via `verification: "volume-changed"`.
-10. **Untouched:** auto-reconnect on stale COM (deliberately deferred — it
-    touches STA `ComExecutor` threading and the RPC failure mode cannot be
-    forced safely to test); live assembly insert + mate (still VBA-generation
-    only); draft, rib, hole wizard, boolean/body ops.
+10. **Auto-reconnect is tested with simulated failures only.** The real
+    dangling-pointer scenario cannot be produced without killing a live
+    SolidWorks session. The detector, retry, bounded-attempt and
+    recursion-guard paths are all covered.
+11. **Three APIs were tried and deliberately not shipped**, because each
+    returns success-shaped nothing on this build and shipping them would mean
+    shipping tools that never work:
+    - `InsertCombineFeature` (boolean add/subtract/intersect) — reachable as a
+      method, returns `None` for all three operation types, via both `IPartDoc`
+      and `IFeatureManager`, with list/tuple/VARIANT tool arrays. Union and
+      subtract remain available via `create_extrusion(merge_result=True)` and
+      `create_cut_extrude`.
+    - Assembly component insertion — `AddComponent4`, `AddComponent5` (config
+      options 0–2), `AddComponents3` and `AddComponent` all return `None` and
+      leave the component count at zero, before and after saving the assembly,
+      with the part loaded and the assembly reactivated.
+12. **Untouched:** rib, hole wizard, split/move-face, appearance and material
+    assignment, live mating.
 
 ---
 
