@@ -723,6 +723,30 @@ class InsertComponentInput(CompatInput):
             raise ValueError("file_path must not be empty")
 
 
+class SetAppearanceInput(CompatInput):
+    """Input schema for setting the model's display colour.
+
+    Attributes:
+        red (float): Red channel, 0-1 or 0-255.
+        green (float): Green channel.
+        blue (float): Blue channel.
+        transparency (float): 0 opaque .. 1 fully transparent.
+    """
+
+    red: float = Field(description="Red channel, 0-1 or 0-255")
+    green: float = Field(description="Green channel, 0-1 or 0-255")
+    blue: float = Field(description="Blue channel, 0-1 or 0-255")
+    transparency: float = Field(
+        default=0.0, description="0 opaque .. 1 fully transparent"
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if min(self.red, self.green, self.blue) < 0:
+            raise ValueError("colour channels must be >= 0")
+        if not 0.0 <= self.transparency <= 1.0:
+            raise ValueError("transparency must be between 0 and 1")
+
+
 class AddMateInput(CompatInput):
     """Input schema for mating two assembly components.
 
@@ -2038,6 +2062,56 @@ async def register_modeling_tools(
             }
         except Exception as e:
             logger.error(f"Error in insert_component tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+
+    @mcp.tool()
+    async def set_appearance(input_data: SetAppearanceInput) -> dict[str, Any]:
+        """Set the model's display colour and transparency.
+
+        Channels are accepted as 0-1 or 0-255. Existing lighting values (ambient,
+        diffuse, specular, shininess) are preserved, so setting a colour does not
+        flatten the model's shading.
+
+        The change is confirmed by reading the stored values back. Note that a
+        SolidWorks *appearance* applied on top — from a material or RealView — can
+        override these values in the viewport, so a confirmed write does not always
+        mean a visible change.
+
+        Args:
+            input_data (SetAppearanceInput): Colour channels and transparency.
+
+        Returns:
+            dict[str, Any]: Status and the colour actually stored.
+
+        Example:
+            ```python
+            await set_appearance({"red": 255, "green": 0, "blue": 0})
+            await set_appearance({"red": 0.2, "green": 0.4, "blue": 1.0,
+                                  "transparency": 0.5})
+            ```
+        """
+        try:
+            input_data = _normalize_input(input_data, SetAppearanceInput)
+            result = await adapter.set_appearance(
+                input_data.red,
+                input_data.green,
+                input_data.blue,
+                input_data.transparency,
+            )
+            if result.is_success:
+                data = result.data if isinstance(result.data, dict) else {}
+                return {
+                    "status": "success",
+                    "message": f"Colour set to RGB {data.get('color_255', '?')}",
+                    "appearance": data,
+                    "execution_time": result.execution_time,
+                }
+            return {
+                "status": "error",
+                "message": f"Failed to set appearance: {result.error}",
+            }
+        except Exception as e:
+            logger.error(f"Error in set_appearance tool: {e}")
             return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()

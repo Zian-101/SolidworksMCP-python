@@ -72,6 +72,28 @@ _MATE_ALIGNMENTS: dict[str, int] = {
 }
 
 
+def _variant_doubles(values: list[float]) -> Any:
+    """Wrap a list of floats as a COM ``SAFEARRAY`` of doubles.
+
+    Several SolidWorks setters reject a plain Python list — measured live,
+    ``SetMaterialPropertyValues`` raises on one and applies the colour when
+    handed a ``VARIANT(VT_ARRAY | VT_R8, ...)``.
+
+    Args:
+        values (list[float]): The values to pass.
+
+    Returns:
+        Any: A VARIANT array, or the original list without pywin32.
+    """
+    variant_ctor = getattr(getattr(win32com, "client", None), "VARIANT", None)
+    if not callable(variant_ctor):
+        return values
+    return variant_ctor(
+        int(getattr(pythoncom, "VT_ARRAY", 0)) | int(getattr(pythoncom, "VT_R8", 0)),
+        [float(v) for v in values],
+    )
+
+
 def _bounding_box_tuple(adapter: Any) -> tuple[float, ...] | None:
     """Return the model's overall box, for before/after comparison.
 
@@ -1967,6 +1989,124 @@ class SolidWorksIOMixin:
                 if os.path.exists(candidate):
                     return candidate
         return ""
+
+    async def set_appearance(
+        self,
+        red: float,
+        green: float,
+        blue: float,
+        transparency: float = 0.0,
+    ) -> AdapterResult[dict[str, Any]]:
+        """Set the model's display colour and transparency.
+
+        Wraps ``IModelDocExtension::SetMaterialPropertyValues``, whose array is
+        nine doubles in 0..1: ``[R, G, B, ambient, diffuse, specular,
+        shininess, transparency, emission]``.  Existing lighting values are
+        preserved — only the colour and transparency entries are replaced — so
+        setting a colour does not flatten the model's shading.
+
+        Colour channels are accepted as 0..1 or 0..255 and normalised.
+
+        The result is confirmed by reading the values back.
+
+        Args:
+            red (float): Red channel.
+            green (float): Green channel.
+            blue (float): Blue channel.
+            transparency (float): 0 opaque .. 1 fully transparent.
+
+        Returns:
+            AdapterResult[dict[str, Any]]: The colour actually applied.
+
+        Raises:
+            Exception: Propagated through ``_handle_com_operation``.
+
+        Example::
+
+            await adapter.set_appearance(255, 0, 0)      # red
+            await adapter.set_appearance(0.2, 0.4, 1.0, transparency=0.5)
+        """
+        adapter = self._adapter(self)
+        if not adapter.currentModel:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR, error="No active model"
+            )
+
+        channels = [red, green, blue]
+        if any(c < 0 for c in channels) or transparency < 0 or transparency > 1:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error=(
+                    "Colour channels must be >= 0 and transparency between "
+                    "0 and 1"
+                ),
+            )
+        # Accept either 0..1 or 0..255.
+        if any(c > 1.0 for c in channels):
+            if any(c > 255.0 for c in channels):
+                return AdapterResult(
+                    status=AdapterResultStatus.ERROR,
+                    error="Colour channels must be 0-1 or 0-255",
+                )
+            channels = [c / 255.0 for c in channels]
+
+        def _apply() -> dict[str, Any]:
+            extension = adapter.currentModel.Extension
+            current = adapter._attempt(
+                lambda: extension.GetMaterialPropertyValues(1, None), default=None
+            )
+            values = (
+                [float(v) for v in current]
+                if isinstance(current, (list, tuple)) and len(current) >= 9
+                else [0.5, 0.5, 0.5, 1.0, 1.0, 0.3, 0.3, 0.0, 0.0]
+            )
+            values[0], values[1], values[2] = channels
+            values[7] = float(transparency)
+
+            # SetMaterialPropertyValues raises on a plain Python list; it needs
+            # a real SAFEARRAY of doubles.
+            adapter._attempt(
+                lambda: extension.SetMaterialPropertyValues(
+                    _variant_doubles(values), 1, None
+                ),
+                default=None,
+            )
+            adapter._attempt(
+                lambda: adapter.currentModel.GraphicsRedraw2(), default=None
+            )
+
+            applied = adapter._attempt(
+                lambda: extension.GetMaterialPropertyValues(1, None), default=None
+            )
+            if not isinstance(applied, (list, tuple)) or len(applied) < 9:
+                raise Exception(
+                    "Colour could not be read back, so it cannot be confirmed"
+                )
+
+            close = all(
+                abs(float(applied[i]) - channels[i]) < 0.01 for i in range(3)
+            )
+            if not close:
+                raise Exception(
+                    f"Colour did not take: asked for "
+                    f"{[round(c, 3) for c in channels]}, the model reports "
+                    f"{[round(float(applied[i]), 3) for i in range(3)]}."
+                )
+
+            return {
+                "color": {
+                    "r": round(float(applied[0]), 4),
+                    "g": round(float(applied[1]), 4),
+                    "b": round(float(applied[2]), 4),
+                },
+                "color_255": [round(float(applied[i]) * 255) for i in range(3)],
+                "transparency": round(float(applied[7]), 4),
+            }
+
+        return cast(
+            AdapterResult[dict[str, Any]],
+            adapter._handle_com_operation("set_appearance", _apply),
+        )
 
     async def get_material_properties(self) -> AdapterResult[dict[str, Any]]:
         """Read the material actually assigned to the active part.

@@ -1279,6 +1279,25 @@ class SolidWorksAdapter(ABC):
             error="insert_component is not implemented by this adapter",
         )
 
+    async def set_appearance(
+        self, red: float, green: float, blue: float, transparency: float = 0.0
+    ) -> "AdapterResult[Any]":
+        """Set the model's display colour and transparency.
+
+        Args:
+            red (float): Red channel, 0-1 or 0-255.
+            green (float): Green channel.
+            blue (float): Blue channel.
+            transparency (float): 0 opaque .. 1 transparent.
+
+        Returns:
+            AdapterResult: The colour applied, or error.
+        """
+        return AdapterResult(
+            status=AdapterResultStatus.ERROR,
+            error="set_appearance is not implemented by this adapter",
+        )
+
     async def add_mate(
         self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
     ) -> "AdapterResult[Any]":

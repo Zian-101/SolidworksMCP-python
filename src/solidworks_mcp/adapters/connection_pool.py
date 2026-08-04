@@ -767,6 +767,14 @@ class ConnectionPoolAdapter(SolidWorksAdapter):
             lambda adapter: adapter.insert_component(file_path, x, y, z),
         )
 
+    async def set_appearance(
+        self, red: float, green: float, blue: float, transparency: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Appearance using pool."""
+        return await self._execute_with_pool(
+            "set_appearance", lambda adapter: adapter.set_appearance(red, green, blue, transparency)
+        )
+
     async def add_mate(
         self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
     ) -> AdapterResult[Any]:

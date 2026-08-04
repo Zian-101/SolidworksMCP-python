@@ -1927,6 +1927,44 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             execution_time=self._delays["model_operation"],
         )
 
+    async def set_appearance(
+        self, red: float, green: float, blue: float, transparency: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Mock appearance change.
+
+        Returns:
+            AdapterResult: Simulated payload.
+        """
+        channels = [red, green, blue]
+        if any(c < 0 for c in channels) or not 0.0 <= transparency <= 1.0:
+            return AdapterResult(
+                status=AdapterResultStatus.ERROR,
+                error="Colour channels must be >= 0 and transparency 0-1",
+            )
+        if any(c > 1.0 for c in channels):
+            if any(c > 255.0 for c in channels):
+                return AdapterResult(
+                    status=AdapterResultStatus.ERROR,
+                    error="Colour channels must be 0-1 or 0-255",
+                )
+            channels = [c / 255.0 for c in channels]
+
+        await asyncio.sleep(self._delays["model_operation"])
+        self._operation_count += 1
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "color": {
+                    "r": round(channels[0], 4),
+                    "g": round(channels[1], 4),
+                    "b": round(channels[2], 4),
+                },
+                "color_255": [round(c * 255) for c in channels],
+                "transparency": transparency,
+            },
+            execution_time=self._delays["model_operation"],
+        )
+
     async def add_mate(
         self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
     ) -> AdapterResult[Any]:

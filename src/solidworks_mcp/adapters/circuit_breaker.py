@@ -870,6 +870,21 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             input_dict={"file_path": file_path, "x": x, "y": y, "z": z},
         )
 
+    async def set_appearance(
+        self, red: float, green: float, blue: float, transparency: float = 0.0
+    ) -> AdapterResult[Any]:
+        """Appearance through circuit breaker."""
+        return await self._execute_with_circuit_breaker(
+            "set_appearance",
+            lambda: self.adapter.set_appearance(red, green, blue, transparency),
+            input_dict={
+                "red": red,
+                "green": green,
+                "blue": blue,
+                "transparency": transparency,
+            },
+        )
+
     async def add_mate(
         self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
     ) -> AdapterResult[Any]:
