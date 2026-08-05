@@ -200,7 +200,7 @@ async def register_drawing_analysis_tools(
 
         except Exception as e:
             logger.error(f"Error in analyze_drawing_comprehensive tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to analyze drawing: {str(e)}"}
 
     @mcp.tool()
     async def analyze_drawing_dimensions(
@@ -1035,7 +1035,7 @@ async def register_drawing_analysis_tools(
 
         except Exception as e:
             logger.error(f"Error in compare_drawing_versions tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to compare versions: {str(e)}"}
 
     @mcp.tool()
     async def validate_drawing_completeness(
@@ -1079,7 +1079,7 @@ async def register_drawing_analysis_tools(
 
         except Exception as e:
             logger.error(f"Error in validate_drawing_completeness tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to validate completeness: {str(e)}"}
 
     tool_count = 8  # Legacy count expected by tests
     return tool_count

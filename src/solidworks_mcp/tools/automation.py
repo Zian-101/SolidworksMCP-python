@@ -590,7 +590,7 @@ End Sub
             logger.error(f"Error in batch_process_files tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed batch processing: {str(e)}",
             }
 
     @mcp.tool()
@@ -802,7 +802,7 @@ End Sub
             logger.error(f"Error in create_template tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to create template: {str(e)}",
             }
 
     @mcp.tool()

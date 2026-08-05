@@ -430,7 +430,7 @@ async def register_drawing_tools(
             logger.error(f"Error in create_drawing_view tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to create drawing view: {str(e)}",
             }
 
     @mcp.tool()
@@ -474,7 +474,7 @@ async def register_drawing_tools(
             }
         except Exception as e:
             logger.error(f"Error in create_standard_views tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to create standard views: {str(e)}"}
 
     @mcp.tool()
     async def list_drawing_views() -> dict[str, Any]:
@@ -499,7 +499,7 @@ async def register_drawing_tools(
             }
         except Exception as e:
             logger.error(f"Error in list_drawing_views tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to list drawing views: {str(e)}"}
 
     @mcp.tool()
     async def add_dimension(input_data: AddDimensionInput) -> dict[str, Any]:
@@ -671,7 +671,7 @@ async def register_drawing_tools(
             logger.error(f"Error in add_note tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to add note: {str(e)}",
             }
 
     @mcp.tool()
@@ -931,7 +931,7 @@ async def register_drawing_tools(
             logger.error(f"Error in auto_dimension_view tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to auto-dimension: {str(e)}",
             }
 
     @mcp.tool()

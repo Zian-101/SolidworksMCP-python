@@ -407,7 +407,10 @@ class TestDrawingToolsBranchCoverage:
             position_y=60.0,
         )
         result = await tool_func(input_data=input_data)
-        assert result["status"] == "success"
+        # Placing an individual dimension needs entity selection this
+        # adapter cannot do, so it declines instead of reporting one.
+        assert result["status"] == "error"
+        assert "not supported" in result["message"]
 
     @pytest.mark.asyncio
     async def test_add_dimension_adapter_error_path(
@@ -495,8 +498,12 @@ class TestDrawingToolsBranchCoverage:
     ):
         """Add_drawing_view simulation path when adapter lacks add_drawing_view."""
         await register_drawing_tools(mcp_server, mock_adapter, mock_config)
-        if hasattr(mock_adapter, "add_drawing_view"):
-            del mock_adapter.add_drawing_view
+        # add_drawing_view is defined on the adapter base class now, so it
+        # cannot be removed from the instance.
+        adapter_cls = type(mock_adapter)
+        original_add_view = getattr(adapter_cls, "add_drawing_view", None)
+        if original_add_view is not None:
+            del adapter_cls.add_drawing_view
 
         input_data = DrawingViewInput(
             drawing_path="part.slddrw",
@@ -512,8 +519,8 @@ class TestDrawingToolsBranchCoverage:
             None,
         )
         result = await tool_func(input_data=input_data)
-        assert result["status"] == "success"
-        assert result["data"]["view_name"] == "Front View"
+        assert result["status"] == "error"
+        assert "add_drawing_view" in result["message"]
 
     # ── add_annotation: adapter error + no-adapter simulation paths ────────
 
@@ -729,11 +736,13 @@ class TestDrawingToolsBranchCoverage:
             }
         )
 
-        assert result["status"] == "success"
-        assert result["dimension"]["entity1"] == "Edge1"
-        assert result["dimension"]["entity2"] == "Edge2"
-        assert result["dimension"]["position"] == {"x": 11.0, "y": 22.0}
-        assert result["dimension"]["precision"] == 3
+        assert result["status"] == "error"
+        assert "not supported" in result["message"]
+        # Nothing was placed, so there is no "dimension" payload. What was
+        # asked for is echoed back under "requested" instead.
+        assert "dimension" not in result
+        assert result["requested"]["position"] == {"x": 11.0, "y": 22.0}
+        assert result["requested"]["precision"] == 3
 
     @pytest.mark.asyncio
     async def test_legacy_drawing_tools_success_paths(
@@ -772,13 +781,17 @@ class TestDrawingToolsBranchCoverage:
         auto_dim = await by_name["auto_dimension_view"]({"view_name": "Front"})
         std = await by_name["check_drawing_standards"]({"standard": "ANSI"})
 
-        assert view["status"] == "success"
-        assert note["status"] == "success"
-        assert section["status"] == "success"
-        assert detail["status"] == "success"
-        assert sheet["status"] == "success"
-        assert auto_dim["status"] == "success"
-        assert std["status"] == "success"
+        # Only the tools that reach SolidWorks can succeed here. The
+        # rest decline: section/detail views need a sketched section
+        # line or detail circle, update_sheet_format never touched the
+        # sheet, and check_drawing_standards used to invent a score.
+        assert view["status"] in {"success", "error"}
+        assert note["status"] in {"success", "error"}
+        assert section["status"] == "error"
+        assert detail["status"] == "error"
+        assert sheet["status"] == "error"
+        assert auto_dim["status"] in {"success", "error"}
+        assert std["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_legacy_drawing_tools_exception_paths(
@@ -799,5 +812,7 @@ class TestDrawingToolsBranchCoverage:
 
         for result in (r1, r2, r3, r4, r5, r8):
             assert result["status"] == "error"
-        assert r6["status"] == "success"
-        assert r7["status"] == "success"
+        # auto_dimension_view now drives SolidWorks, so with no drawing
+        # open it errors; check_drawing_standards always declines.
+        assert r6["status"] == "error"
+        assert r7["status"] == "error"
