@@ -40,6 +40,11 @@ closes those gaps.
 | `6b6024e` | Assembly mates |
 | `bbc9e8d` | `set_appearance` |
 | `7dbbe56` | Regression tests for honesty + wrapper wiring |
+| `6fbb154` | Live end-to-end workflow test; dict inputs fixed in drawing tools |
+| `0b842c3` | **`list_features` 5.9 s → 0.8 s** |
+| `e5b062a` | Targeted flagging across every feature-tree walk |
+| `64d93cf` | Perf guard tests; UTF-8 BOM stripped |
+| `07fe817` | Last fabricated payloads removed from automation/macro/template |
 
 ---
 
@@ -201,6 +206,32 @@ invalidation, so caching them serves stale values mid-build.
     were retried on a healthy session with real geometry after the `save_file`
     fix and still return nothing.
 15. **Untouched:** hole wizard, split body.
+
+---
+
+## Performance
+
+`list_features` took **5.9 seconds** on a 20-feature model — an agent calls it
+constantly between edits. Everything else was under 600 ms.
+
+Cause: `flag_methods(obj, "IFeature")` per feature. It flags all ~100 methods of
+the interface (27 ms measured) and caches by `id(obj)` — every feature is a
+fresh dispatch, so **the cache never hits**. The same pattern was in three more
+loops.
+
+`flag_members(obj, *names)` flags only what the loop reads:
+
+| | before | after |
+|---|---|---|
+| `list_features` | 5906 ms | **~800 ms** |
+| `create_cut_extrude` | 4411 ms | **937 ms** |
+| `pattern_circular` | 11417 ms | **3028 ms** |
+
+Output unchanged throughout: same features in the same order, patterned disc
+still 45553.093 mm³, `instances_verified` still 6.0.
+
+A single COM attribute read costs ~6.5 ms, so what remains is dominated by
+round-trip count. `open_model` (3331 ms) is SolidWorks loading the file.
 
 ---
 
