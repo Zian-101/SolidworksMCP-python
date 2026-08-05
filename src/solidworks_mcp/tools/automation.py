@@ -648,7 +648,7 @@ End Sub
             logger.error(f"Error in manage_design_table tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to manage design table: {str(e)}",
             }
 
     @mcp.tool()
@@ -704,7 +704,7 @@ End Sub
             logger.error(f"Error in execute_workflow tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to execute workflow: {str(e)}",
             }
 
     @mcp.tool()
@@ -854,7 +854,7 @@ End Sub
             logger.error(f"Error in optimize_performance tool: {e}")
             return {
                 "status": "error",
-                "message": f"Unexpected error: {str(e)}",
+                "message": f"Failed to optimize performance: {str(e)}",
             }
 
     tool_count = 8  # Number of tools registered

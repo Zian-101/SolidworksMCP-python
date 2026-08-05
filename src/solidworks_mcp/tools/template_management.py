@@ -317,7 +317,7 @@ async def register_template_management_tools(
             }
         except Exception as e:
             logger.error(f"Error in apply_template tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to apply template: {str(e)}"}
 
     @mcp.tool()
     async def batch_apply_template(input_data: TemplateBatchInput) -> dict[str, Any]:
@@ -359,7 +359,7 @@ async def register_template_management_tools(
             }
         except Exception as e:
             logger.error(f"Error in batch_apply_template tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed batch apply template: {str(e)}"}
 
     @mcp.tool()
     async def compare_templates(input_data: TemplateComparisonInput) -> dict[str, Any]:
@@ -379,6 +379,24 @@ async def register_template_management_tools(
             dict[str, Any]: File-level comparison, or an error.
         """
         try:
+            if hasattr(adapter, "compare_templates"):
+                result = await adapter.compare_templates(
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Template comparison completed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed to compare templates",
+                }
+
             input_data = normalize_input(input_data, TemplateComparisonInput)
             import hashlib
             from datetime import datetime, timezone
@@ -559,7 +577,7 @@ async def register_template_management_tools(
                     }
                 return {
                     "status": "error",
-                    "message": result.error or "Failed to list library",
+                    "message": result.error or "Failed to list template library",
                 }
 
             payload = input_data or {}

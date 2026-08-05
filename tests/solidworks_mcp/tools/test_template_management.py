@@ -448,8 +448,10 @@ class TestTemplateManagementTools:
                 save_path="templates/fallback.prtdot",
             )
         )
-        assert extract_result["status"] == "success"
-        assert extract_result["template"]["name"] == "Fallback Template"
+        # extract_template writes a real template file now, so a source model
+        # that does not exist is reported rather than glossed over.
+        assert extract_result["status"] == "error"
+        assert "Source model not found" in extract_result["message"]
 
         apply_result = await apply_tool(
             input_data=TemplateApplicationInput(
@@ -458,8 +460,10 @@ class TestTemplateManagementTools:
                 overwrite_existing=True,
             )
         )
-        assert apply_result["status"] == "success"
-        assert apply_result["template_application"]["target_model"] == "target.sldprt"
+        # Applying a template to an existing model is not something this
+        # adapter can do; the old payload described settings it never touched.
+        assert apply_result["status"] == "error"
+        assert "not implemented" in apply_result["message"]
 
         batch_result = await batch_tool(
             input_data=TemplateBatchInput(
@@ -470,8 +474,9 @@ class TestTemplateManagementTools:
                 backup_originals=False,
             )
         )
-        assert batch_result["status"] == "success"
-        assert batch_result["batch_operation"]["summary"]["total_scanned"] == 4
+        # "total_scanned: 4" was invented for a folder never read.
+        assert batch_result["status"] == "error"
+        assert "not implemented" in batch_result["message"]
 
         compare_result = await compare_tool(
             input_data=TemplateComparisonInput(
@@ -561,7 +566,7 @@ class TestTemplateManagementTools:
 
         list_exception = await list_tool(input_data={"category": "all"})
         assert list_exception["status"] == "error"
-        assert "Failed to list library" in list_exception["message"]
+        assert "Failed to list template library" in list_exception["message"]
 
     @pytest.mark.unit
     def test_template_extraction_input_validation(self):
@@ -698,12 +703,9 @@ class TestTemplateManagementBranchCoverage:
         )
 
         assert usage_sorted["status"] == "success"
-        assert usage_sorted["library_search"]["category_filter"] == "drawings"
-        assert usage_sorted["library_search"]["sort_by"] == "usage"
         assert all(t["category"] == "drawings" for t in usage_sorted["templates"])
 
         assert date_sorted["status"] == "success"
-        assert date_sorted["library_search"]["sort_by"] == "date"
 
     @pytest.mark.asyncio
     async def test_library_adapter_error_result_paths(

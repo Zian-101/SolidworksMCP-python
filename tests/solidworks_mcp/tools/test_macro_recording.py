@@ -495,8 +495,11 @@ class TestMacroRecordingTools:
                 "clean_code": False,
             }
         )
-        assert result["status"] == "success"
-        assert result["recorded_macro"]["session_id"] == "REC-12345"
+        # Nothing was ever recording: SolidWorks drives macro recording
+        # from its UI, so the tool declines instead of reporting a
+        # session it never started.
+        assert result["status"] == "error"
+        assert "not implemented" in result["message"]
 
     @pytest.mark.asyncio
     async def test_stop_macro_recording_exception_path(
@@ -560,8 +563,9 @@ class TestMacroRecordingTools:
                 pause_between_runs=0,
             )
         )
-        assert execute_result["status"] == "success"
-        assert execute_result["data"]["repeat_count"] == 2
+        # No adapter implements execute_macro, so the macro never ran.
+        assert execute_result["status"] == "error"
+        assert "not run" in execute_result["message"]
 
         batch_result = await batch_tool(
             input_data=MacroBatchInput(
@@ -569,8 +573,10 @@ class TestMacroRecordingTools:
                 stop_on_error=True,
             )
         )
-        assert batch_result["status"] == "partial_success"
-        assert batch_result["data"]["failed_macros"] == 1
+        # "partial_success" with one failed macro was invented - the batch
+        # never ran, and it always marked the same entry failed.
+        assert batch_result["status"] == "error"
+        assert "not implemented" in batch_result["message"]
 
     @pytest.mark.asyncio
     async def test_execute_macro_exception_path(
@@ -648,8 +654,10 @@ class TestMacroRecordingTools:
             )
         )
 
-        assert result["status"] == "success"
-        assert len(sleep_calls) == 2
+        # The fallback used to sleep between runs of a macro it never
+        # executed. It now declines, so nothing sleeps.
+        assert result["status"] == "error"
+        assert not sleep_calls
 
     @pytest.mark.asyncio
     async def test_analyze_macro_fallback_path(self, mcp_server, mock_config):
@@ -668,8 +676,10 @@ class TestMacroRecordingTools:
                 macro_file="analysis.swp", analysis_depth="Full"
             )
         )
-        assert result["status"] == "success"
-        assert result["analysis"]["code_metrics"]["total_lines"] == 67
+        # The metrics were invented for a .swp it never opened - and a
+        # .swp is a binary VBA project, so it cannot be parsed as text.
+        assert result["status"] == "error"
+        assert "not implemented" in result["message"]
 
     @pytest.mark.asyncio
     async def test_analyze_macro_adapter_error_path(
@@ -744,10 +754,9 @@ class TestMacroRecordingTools:
         optimize_result = await optimize_tool(
             input_data={"macro_file": "legacy.swp", "level": "aggressive"}
         )
-        assert optimize_result["status"] == "success"
-        assert (
-            optimize_result["optimization_report"]["optimization_level"] == "aggressive"
-        )
+        # The optimisation report described work never performed.
+        assert optimize_result["status"] == "error"
+        assert "not implemented" in optimize_result["message"]
 
         library_result = await library_tool(
             input_data={
@@ -757,8 +766,9 @@ class TestMacroRecordingTools:
                 "include_templates": False,
             }
         )
-        assert library_result["status"] == "success"
-        assert library_result["data"]["library_name"] == "Team Library"
+        # No library was ever written.
+        assert library_result["status"] == "error"
+        assert "not implemented" in library_result["message"]
 
     @pytest.mark.asyncio
     async def test_optimize_and_library_adapter_error_paths(

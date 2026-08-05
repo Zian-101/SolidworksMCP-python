@@ -295,7 +295,7 @@ async def register_macro_recording_tools(
             }
         except Exception as e:
             logger.error(f"Error in stop_macro_recording tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to stop recording: {str(e)}"}
 
     @mcp.tool()
     async def execute_macro(input_data: MacroPlaybackInput) -> dict[str, Any]:
@@ -422,7 +422,7 @@ async def register_macro_recording_tools(
             }
         except Exception as e:
             logger.error(f"Error in analyze_macro tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to analyze macro: {str(e)}"}
 
     @mcp.tool()
     async def batch_execute_macros(input_data: MacroBatchInput) -> dict[str, Any]:
@@ -463,7 +463,7 @@ async def register_macro_recording_tools(
             }
         except Exception as e:
             logger.error(f"Error in batch_execute_macros tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed batch execution: {str(e)}"}
 
     @mcp.tool()
     async def optimize_macro(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -504,7 +504,7 @@ async def register_macro_recording_tools(
             }
         except Exception as e:
             logger.error(f"Error in optimize_macro tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to optimize macro: {str(e)}"}
 
     @mcp.tool()
     async def create_macro_library(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -545,7 +545,7 @@ async def register_macro_recording_tools(
             }
         except Exception as e:
             logger.error(f"Error in create_macro_library tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {"status": "error", "message": f"Failed to create macro library: {str(e)}"}
 
     tool_count = 8  # Macro recording and management tools
     return tool_count
