@@ -240,23 +240,25 @@ async def test_drawing_tools_simulation_branches(mcp_server, mock_config):
     """Test drawing tools simulation branches."""
     await register_drawing_tools(mcp_server, object(), mock_config)
 
+    # No adapter behind these tools now, so they decline rather than
+    # returning a simulated view.
     assert (
         await (await _tool(mcp_server, "create_drawing_view"))(
             input_data=CreateDrawingViewInput(model_path="m.sldprt", view_type="front")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "add_dimension"))(
             input_data=DrawingAddDimensionInput(
                 dimension_type="linear", entity1="L1", position_x=1, position_y=2
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "add_note"))(
             input_data=AddNoteInput(text="n", position_x=1, position_y=2)
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "create_section_view"))(
             input_data=CreateSectionViewInput(
@@ -266,36 +268,38 @@ async def test_drawing_tools_simulation_branches(mcp_server, mock_config):
                 view_position_y=2,
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "create_detail_view"))(
             input_data=CreateDetailViewInput(
                 center_x=0, center_y=0, radius=2, view_position_x=3, view_position_y=4
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "update_sheet_format"))(
             input_data=UpdateSheetFormatInput(format_file="f.slddrt")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "auto_dimension_view"))(
             input_data={"view_name": "Front"}
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "check_drawing_standards"))(
             input_data={"standard": "ANSI"}
         )
-    )["status"] == "success"
+    )["status"] == "error"
 
     alias_result = await (await _tool(mcp_server, "add_dimension"))(
         input_data=DimensionInput(
             entities=["E1", "E2"], position=[5, 6], dimension_type="linear"
         )
     )
-    assert alias_result["status"] == "success"
+    # add_dimension declines: placing one needs drawing entities selected
+    # by name, which this adapter cannot enumerate.
+    assert alias_result["status"] == "error"
 
     assert (
         await (await _tool(mcp_server, "create_technical_drawing"))(
@@ -303,17 +307,17 @@ async def test_drawing_tools_simulation_branches(mcp_server, mock_config):
                 output_path="o.slddrw", auto_populate_views=True
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "add_drawing_view"))(
             input_data=DrawingViewInput(
                 view_name="Front", view_type="front", position=[1, 1]
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "update_title_block"))(input_data={"title": "A"})
-    )["status"] == "success"
+    )["status"] == "error"
 
 
 class _ExportFallbackAdapter:
@@ -370,6 +374,9 @@ async def test_export_tools_fallback_and_aliases(mcp_server, mock_config):
             )
         )
     )["status"] == "success"
+    # batch_export's no-adapter fallback used to report a completed run
+    # with zero files; it errors now.
+    # batch_export errors without adapter support.
     assert (
         await (await _tool(mcp_server, "batch_export"))(
             input_data=BatchExportInput(
@@ -392,11 +399,13 @@ async def test_drawing_analysis_simulation_paths(mcp_server, mock_config):
     """Test drawing analysis simulation paths."""
     await register_drawing_analysis_tools(mcp_server, object(), mock_config)
 
+    # The comprehensive analysis was entirely invented; with no adapter
+    # and a drawing that does not exist, it declines.
     assert (
         await (await _tool(mcp_server, "analyze_drawing_comprehensive"))(
             input_data=DrawingAnalysisInput(drawing_path="a.slddrw")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "analyze_drawing_dimensions"))(
             input_data=DimensionAnalysisInput(drawing_path="a.slddrw")
@@ -406,22 +415,22 @@ async def test_drawing_analysis_simulation_paths(mcp_server, mock_config):
         await (await _tool(mcp_server, "analyze_drawing_annotations"))(
             input_data=AnnotationAnalysisInput(drawing_path="a.slddrw")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "check_drawing_compliance"))(
             input_data=ComplianceCheckInput(drawing_path="a.slddrw")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "analyze_drawing_views"))(
             input_data={"drawing_path": "a.slddrw"}
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "generate_drawing_report"))(
             input_data={"drawing_path": "a.slddrw", "report_type": "summary"}
         )
-    )["status"] == "success"
+    )["status"] == "error"
 
 
 @pytest.mark.asyncio

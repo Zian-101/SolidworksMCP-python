@@ -482,6 +482,24 @@ End Sub
             dict[str, Any]: Real per-file results.
         """
         try:
+            if hasattr(adapter, "batch_process_files"):
+                result = await adapter.batch_process_files(
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Batch processing completed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed batch processing",
+                }
+
             input_data = _normalize_input(input_data, BatchProcessInput)
             import time as _time
             from pathlib import Path as _Path
@@ -727,6 +745,24 @@ End Sub
             dict[str, Any]: The template path actually written.
         """
         try:
+            if hasattr(adapter, "create_template"):
+                result = await adapter.create_template(
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Template created",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed to create template",
+                }
+
             input_data = _normalize_input(input_data, TemplateInput)
             import shutil
             from pathlib import Path as _Path

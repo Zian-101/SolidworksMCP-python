@@ -455,10 +455,10 @@ class TestAutomationTools:
 
         assert vba["status"] == "success"
         assert "vba_code" in vba
-        assert start["status"] == "success"
-        assert start["macro_recording"]["status"] == "recording"
-        assert stop["status"] == "success"
-        assert stop["macro_recording"]["status"] == "stopped"
+        # Nothing was ever recording; SolidWorks drives that from its UI.
+        assert start["status"] == "error"
+        # Nothing was recording, so there is nothing to stop.
+        assert stop["status"] == "error"
         assert batch["status"] == "success"
         assert batch["batch_process"]["files_found"] == 25
         assert table["status"] == "success"
@@ -527,9 +527,9 @@ class TestAutomationTools:
         assert start["status"] == "error"
         assert "Unexpected error" in start["message"]
         assert batch["status"] == "error"
-        assert "Unexpected error" in batch["message"]
+        assert "Failed batch processing" in batch["message"]
         assert table["status"] == "error"
-        assert "Unexpected error" in table["message"]
+        assert "Failed to manage design table" in table["message"]
         assert workflow["status"] == "error"
         assert "Unexpected error" in workflow["message"]
         assert template["status"] == "error"

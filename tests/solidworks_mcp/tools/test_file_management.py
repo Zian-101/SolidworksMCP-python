@@ -405,7 +405,9 @@ class TestFileManagementTools:
 
         properties_result = await properties_tool()
         assert properties_result["status"] == "success"
-        assert properties_result["properties"]["file_name"] == "Example.sldprt"
+        # get_file_properties used to report a hardcoded Example.sldprt for
+        # every model; it now reports the real file.
+        assert properties_result["properties"]["file_name"] != "Example.sldprt"
 
     @pytest.mark.asyncio
     async def test_save_as_solidworks_path_success_and_error(

@@ -150,6 +150,24 @@ async def register_drawing_analysis_tools(
             views.
         """
         try:
+            if hasattr(adapter, "analyze_drawing_comprehensive"):
+                result = await adapter.analyze_drawing_comprehensive(
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Drawing analysis completed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed to analyze drawing",
+                }
+
             from datetime import datetime, timezone
             from pathlib import Path
 

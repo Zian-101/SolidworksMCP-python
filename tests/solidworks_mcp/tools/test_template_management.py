@@ -485,8 +485,8 @@ class TestTemplateManagementTools:
                 comparison_type="full",
             )
         )
-        assert compare_result["status"] == "success"
-        assert compare_result["comparison"]["similarity_score"] == 85.5
+        # The 85.5% similarity was invented for templates never opened.
+        assert compare_result["status"] == "error"
 
         save_result = await save_tool(
             input_data={
@@ -496,8 +496,9 @@ class TestTemplateManagementTools:
                 "author": "QA",
             }
         )
-        assert save_result["status"] == "success"
-        assert "library_entry" in save_result
+        # The library is a real file on disk now, so a template path that
+        # does not exist is reported instead of being recorded.
+        assert save_result["status"] == "error"
 
         list_result = await list_tool(
             input_data={"category": "all", "search_term": "", "sort_by": "name"}

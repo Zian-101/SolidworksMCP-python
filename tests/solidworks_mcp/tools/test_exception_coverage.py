@@ -274,9 +274,10 @@ class TestAutomationExceptionPaths:
                 create=True,
                 new=AsyncMock(side_effect=RuntimeError("stop")),
             ):
-                # Just verify stop_macro_recording returns a success dict normally
+                # stop_macro_recording declines: SolidWorks drives macro
+                # recording from its UI, so there is nothing to stop here.
                 result = await fn({})
-                assert result["status"] == "success"
+                assert result["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_batch_process_files_exception(self):
