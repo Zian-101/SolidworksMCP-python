@@ -289,6 +289,25 @@ async def register_template_management_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "apply_template"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.apply_template(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Template applied",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: apply_template",
+                }
+
             input_data = normalize_input(input_data, TemplateApplicationInput)
             return {
                 "status": "error",
@@ -312,6 +331,25 @@ async def register_template_management_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "batch_apply_template"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.batch_apply_template(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Template applied across files",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: batch_apply_template",
+                }
+
             input_data = normalize_input(input_data, TemplateBatchInput)
             return {
                 "status": "error",

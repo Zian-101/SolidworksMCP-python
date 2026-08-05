@@ -268,6 +268,25 @@ async def register_macro_recording_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "stop_macro_recording"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.stop_macro_recording(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Macro recording stopped",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: stop_macro_recording",
+                }
+
             return {
                 "status": "error",
                 "message": (
@@ -376,6 +395,25 @@ async def register_macro_recording_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "analyze_macro"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.analyze_macro(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Macro analyzed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: analyze_macro",
+                }
+
             return {
                 "status": "error",
                 "message": (
@@ -398,6 +436,25 @@ async def register_macro_recording_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "batch_execute_macros"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.batch_execute_macros(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Macros executed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: batch_execute_macros",
+                }
+
             return {
                 "status": "error",
                 "message": (
@@ -420,6 +477,25 @@ async def register_macro_recording_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "optimize_macro"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.optimize_macro(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Macro optimized",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: optimize_macro",
+                }
+
             return {
                 "status": "error",
                 "message": (
@@ -442,6 +518,25 @@ async def register_macro_recording_tools(
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "create_macro_library"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.create_macro_library(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Macro library created",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: create_macro_library",
+                }
+
             return {
                 "status": "error",
                 "message": (

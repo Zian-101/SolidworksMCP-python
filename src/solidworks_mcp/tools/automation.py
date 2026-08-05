@@ -610,6 +610,25 @@ End Sub
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "manage_design_table"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.manage_design_table(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Design table updated",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: manage_design_table",
+                }
+
             input_data = _normalize_input(input_data, DesignTableInput)
             return {
                 "status": "error",
@@ -649,6 +668,25 @@ End Sub
             dict[str, Any]: An error naming the alternative.
         """
         try:
+            if hasattr(adapter, "execute_workflow"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.execute_workflow(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Workflow completed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: execute_workflow",
+                }
+
             input_data = _normalize_input(input_data, WorkflowInput)
             return {
                 "status": "error",
@@ -784,6 +822,25 @@ End Sub
             dict[str, Any]: An error naming where these settings live.
         """
         try:
+            if hasattr(adapter, "optimize_performance"):
+                payload = (
+                    input_data.model_dump()
+                    if hasattr(input_data, "model_dump")
+                    else input_data
+                )
+                result = await adapter.optimize_performance(payload)
+                if result.is_success:
+                    return {
+                        "status": "success",
+                        "message": "Performance optimization completed",
+                        "data": result.data,
+                        "execution_time": result.execution_time,
+                    }
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed: optimize_performance",
+                }
+
             return {
                 "status": "error",
                 "message": (
