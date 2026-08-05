@@ -122,7 +122,7 @@ def test_add_fillet_and_chamfer_selection_and_feature_failures() -> None:
 
     chamfer_select_error = features._add_chamfer_impl(adapter, 1.0, ["Edge<bad>"])
     assert chamfer_select_error.status == AdapterResultStatus.ERROR
-    assert "Failed to select any of the named edge" in (chamfer_select_error.error or "")
+    assert "Failed to select edge" in (chamfer_select_error.error or "")
 
     chamfer_feature_error = features._add_chamfer_impl(adapter, 1.0, ["Edge<2>"])
     assert chamfer_feature_error.status == AdapterResultStatus.ERROR

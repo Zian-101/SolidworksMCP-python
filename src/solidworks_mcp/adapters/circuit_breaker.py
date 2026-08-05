@@ -338,8 +338,17 @@ class CircuitBreakerAdapter(SolidWorksAdapter):
             latency_ms = (time.time() - t0) * 1000.0
             if result.is_success:
                 self._record_operation_success(operation_name)
+                # A successful COM call proves the connection is alive, so it
+                # also clears the aggregate circuit that gates call()/connect().
+                # Without this a global HALF_OPEN never closed, because every
+                # success was recorded against the per-operation circuit only.
+                self._record_success()
             else:
                 self._record_operation_failure(operation_name)
+                # Mirrored onto the aggregate circuit for the legacy
+                # call()/connect() path. Isolation is unaffected: this method
+                # gates on _should_allow_operation, never on the global state.
+                self._record_failure()
             self._soc_log(operation_name, input_dict, result, latency_ms)
             return result
         except Exception as e:

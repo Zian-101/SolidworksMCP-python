@@ -37,10 +37,17 @@ def open_circuit_breaker():
         failure_threshold=1,
         recovery_timeout=9999.0,
     )
-    # Force state to OPEN without timing dependencies
-    cb.state = CircuitState.OPEN
+    # Force state to OPEN without timing dependencies.
     import time
+
+    cb.state = CircuitState.OPEN
     cb.last_failure_time = time.time()
+    # Circuits are per-operation now, so a known-broken tool blocks only itself
+    # instead of every other tool. Setting the global state alone no longer
+    # gates a call, so open the circuit for the operation under test too.
+    circuit = cb._op_circuit("open_model")
+    circuit["state"] = CircuitState.OPEN
+    circuit["last_failure_time"] = time.time()
     return cb
 
 

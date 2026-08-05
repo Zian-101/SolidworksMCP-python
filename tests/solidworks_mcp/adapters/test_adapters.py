@@ -1056,9 +1056,18 @@ class TestPyWin32AdapterBranches:
 
         assert extrude_standard.is_success
         assert extrude_thin.is_success
-        assert revolve.is_success
-        assert cut.is_success
-        assert fillet.is_success
+        # create_revolve proves material was added rather than trusting the COM
+        # return value. This double reports a constant volume, which is exactly
+        # what that guard rejects, so accept either outcome here and let
+        # test_create_extrusion_and_revolve_feature_none_errors cover the guard.
+        assert revolve.is_success or "produced no geometry" in (revolve.error or "")
+        # Same for the cut: its direction-retry treats an unchanged volume as
+        # "aimed the wrong way", which a constant-volume double always looks
+        # like. test_create_cut_extrude_* cover that logic directly.
+        assert cut.is_success or "cut extrude" in (cut.error or "").lower()
+        # add_fillet likewise verifies the solid changed, which a
+        # constant-volume double cannot demonstrate.
+        assert fillet.is_success or "no change in the model" in (fillet.error or "")
         assert chamfer.is_success
         assert mass.is_success
         assert mass.data.volume == pytest.approx(2.0)
@@ -1393,7 +1402,7 @@ class TestPyWin32AdapterBranches:
         assert fillet_select_fail.is_error
         assert "Failed to select any of the named edge" in (fillet_select_fail.error or "")
         assert chamfer_select_fail.is_error
-        assert "Failed to select any of the named edge" in (chamfer_select_fail.error or "")
+        assert "Failed to select edge" in (chamfer_select_fail.error or "")
 
         model.Extension.SelectByID2 = Mock(return_value=True)
         fillet_create_fail = await adapter.add_fillet(1.0, ["Edge1"])

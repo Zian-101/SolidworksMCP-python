@@ -3275,6 +3275,13 @@ def _add_fillet_impl(
             None,  # PointRhoArray
         )
 
+        # SolidWorks returning nothing means the fillet was rejected outright.
+        # Without this the volume guard below was the only check, and it is
+        # skipped when the volume is unmeasurable - so a rejected fillet was
+        # reported as success. add_chamfer has always had this check.
+        if not feature:
+            raise Exception("Failed to create fillet")
+
         # Verify the solid actually changed: SolidWorks can return a Feature
         # for a fillet that rounded nothing.
         volume_after = _model_volume(adapter)
