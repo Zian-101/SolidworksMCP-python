@@ -11,31 +11,12 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..adapters.base import SolidWorksAdapter
-from .input_compat import CompatInput
+from .input_compat import (
+    CompatInput,
+    normalize_input as _normalize_input,
+)
 
 
-def _normalize_input(input_data: Any, model_type: type) -> Any:
-    """Accept either a model instance or a plain dict.
-
-    FastMCP hands these tools a validated model, but they are also called
-    directly with dicts — from tests, from the agent harness, and from other
-    tools. Without this the tool raised ``'dict' object has no attribute ...``
-    instead of doing the work.
-
-    Args:
-        input_data (Any): The incoming payload.
-        model_type (type): The Pydantic model to coerce to.
-
-    Returns:
-        Any: An instance of ``model_type``.
-    """
-    if input_data is None:
-        return model_type()
-    if isinstance(input_data, model_type):
-        return input_data
-    if hasattr(input_data, "model_dump"):
-        return model_type.model_validate(input_data.model_dump())
-    return model_type.model_validate(input_data)
 
 
 # Input schemas using Python 3.14 built-in types

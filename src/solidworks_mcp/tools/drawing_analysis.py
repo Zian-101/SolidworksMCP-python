@@ -133,161 +133,74 @@ async def register_drawing_analysis_tools(
     async def analyze_drawing_comprehensive(
         input_data: DrawingAnalysisInput,
     ) -> dict[str, Any]:
-        """Handle analyze drawing comprehensive.
+        """Report what can actually be read about a drawing.
+
+        Combines file-level facts (size, modification time) with the real view list
+        from the active drawing.
+
+        It used to invent the entire report: "2.3 MB", 2 sheets, 8 views split into
+        4 standard / 2 section / 2 detail, and scales of 1:1, 1:2 and 2:1 — for a
+        drawing it never opened.
 
         Args:
-            input_data (DrawingAnalysisInput): The input data value.
+            input_data (DrawingAnalysisInput): Drawing path.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await analyze_drawing_comprehensive(analysis_input)
+            dict[str, Any]: Real file facts and, when a drawing is active, its
+            views.
         """
         try:
-            if hasattr(adapter, "analyze_drawing_comprehensive"):
-                result = await adapter.analyze_drawing_comprehensive(
-                    input_data.model_dump()
-                )
-                if result.is_success:
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            drawing_path = str(getattr(input_data, "drawing_path", "") or "").strip()
+            file_info: dict[str, Any] = {}
+            if drawing_path:
+                path = Path(drawing_path)
+                if not path.exists():
                     return {
-                        "status": "success",
-                        "message": "Comprehensive drawing analysis completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
+                        "status": "error",
+                        "message": f"Drawing not found: {drawing_path}",
                     }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to analyze drawing",
+                stat = path.stat()
+                file_info = {
+                    "file_path": str(path),
+                    "size_bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat(),
                 }
 
-            # Simulate comprehensive drawing analysis
-            analysis_results = {
-                "drawing_info": {
-                    "file_path": input_data.drawing_path,
-                    "file_size": "2.3 MB",
-                    "sheet_count": 2,
-                    "view_count": 8,
-                    "last_modified": "2024-01-15 10:30:00",
-                },
-                "view_analysis": {
-                    "total_views": 8,
-                    "view_types": {
-                        "standard_views": 4,
-                        "section_views": 2,
-                        "detail_views": 2,
-                        "auxiliary_views": 0,
-                    },
-                    "scale_analysis": {
-                        "scales_used": ["1:1", "1:2", "2:1"],
-                        "scale_consistency": "Good",
-                        "recommended_scales": ["1:1", "1:2"],
-                    },
-                    "view_placement": {
-                        "alignment": "Good",
-                        "spacing": "Adequate",
-                        "overlap_issues": 0,
-                    },
-                },
-                "dimension_analysis": {
-                    "total_dimensions": 47,
-                    "dimension_types": {
-                        "linear": 28,
-                        "angular": 6,
-                        "radial": 8,
-                        "diameter": 5,
-                    },
-                    "precision_consistency": {
-                        "status": "Warning",
-                        "issues": ["Mixed precision: 2 and 3 decimal places used"],
-                        "recommendation": "Standardize to 2 decimal places",
-                    },
-                    "tolerance_analysis": {
-                        "dimensions_with_tolerances": 12,
-                        "tolerance_types": {"bilateral": 8, "unilateral": 4},
-                        "formatting_consistency": "Good",
-                    },
-                },
-                "annotation_analysis": {
-                    "notes": {
-                        "count": 6,
-                        "formatting": "Consistent",
-                        "font_sizes": ["3.5mm", "2.5mm"],
-                        "issues": [],
-                    },
-                    "symbols": {
-                        "count": 14,
-                        "types": {
-                            "surface_finish": 8,
-                            "geometric_tolerance": 4,
-                            "weld": 2,
-                        },
-                        "standard_compliance": "ISO compliant",
-                    },
-                    "balloons": {
-                        "count": 23,
-                        "numbering": "Sequential",
-                        "placement": "Good",
-                    },
-                },
-                "standards_compliance": {
-                    "overall_score": 87,
-                    "title_block": {
-                        "score": 90,
-                        "required_fields": [
-                            "Title",
-                            "Drawing Number",
-                            "Scale",
-                            "Date",
-                            "Drawn By",
-                        ],
-                        "missing_fields": [],
-                        "format_compliance": "Good",
-                    },
-                    "line_weights": {
-                        "score": 85,
-                        "visible_lines": "0.5mm - Correct",
-                        "hidden_lines": "0.25mm - Correct",
-                        "centerlines": "0.25mm - Correct",
-                        "issues": ["Some dimension lines too thick"],
-                    },
-                    "text_standards": {
-                        "score": 88,
-                        "font_type": "ISO 3098 - Compliant",
-                        "text_heights": "Standard sizes used",
-                        "issues": ["One note uses non-standard height"],
-                    },
-                },
-            }
-
-            recommendations = [
-                "Standardize dimension precision to 2 decimal places",
-                "Review dimension line weights for consistency",
-                "Consider adding missing auxiliary view for clarity",
-                "Update one note to use standard text height",
-            ]
+            views: list[str] = []
+            view_error = None
+            listed = await adapter.list_drawing_views()
+            if listed.is_success and isinstance(listed.data, list):
+                views = listed.data
+            else:
+                view_error = str(listed.error)
 
             return {
                 "status": "success",
-                "message": "Comprehensive drawing analysis completed",
-                "analysis_results": analysis_results,
-                "overall_quality_score": 87,
-                "recommendations": recommendations,
-                "compliance_summary": {
-                    "standard": "ISO 128",
-                    "compliance_level": "High",
-                    "critical_issues": 0,
-                    "warnings": 3,
-                    "suggestions": 4,
+                "message": (
+                    f"{len(views)} view(s) on the active drawing"
+                    if views
+                    else "File facts only - no active drawing to inspect"
+                ),
+                "analysis": {
+                    "drawing_info": file_info,
+                    "views": views,
+                    "view_count": len(views),
+                    "view_note": view_error,
                 },
+                "note": (
+                    "View types, scales and sheet count are not available "
+                    "through this adapter and are not estimated."
+                ),
             }
 
         except Exception as e:
             logger.error(f"Error in analyze_drawing_comprehensive tool: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to analyze drawing: {str(e)}",
-            }
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def analyze_drawing_dimensions(

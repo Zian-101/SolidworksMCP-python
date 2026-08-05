@@ -17,7 +17,10 @@ from ..adapters.base import (
     SolidWorksAdapter,
     SweepParameters,
 )
-from .input_compat import CompatInput
+from .input_compat import (
+    CompatInput,
+    normalize_input as _normalize_input,
+)
 
 TInput = TypeVar("TInput", bound=BaseModel)
 
@@ -50,19 +53,6 @@ def _result_value(data: Any, *keys: str, default: Any = None) -> Any:
     return default
 
 
-def _normalize_input(input_data: Any, model_type: type[TInput]) -> TInput:
-    """Build internal normalize input.
-
-    Args:
-        input_data (Any): The input data value.
-        model_type (type[TInput]): The model type value.
-
-    Returns:
-        TInput: The result produced by the operation.
-    """
-    if isinstance(input_data, model_type):
-        return input_data
-    return model_type.model_validate(input_data)
 
 
 class OpenModelInput(BaseModel):

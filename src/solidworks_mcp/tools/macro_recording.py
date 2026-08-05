@@ -258,93 +258,25 @@ async def register_macro_recording_tools(
 
     @mcp.tool()
     async def stop_macro_recording(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stop macro recording and save the recorded macro.
+        """Stop a macro recording.
 
-        This tool stops the active recording session and saves the generated macro code to a
-        file.
+        Not implemented.
 
-        Args:
-            input_data (dict[str, Any]): The input data value.
+        Previously: reported a completed recording with an action count and a file path that was never written.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await stop_macro_recording(stop_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "stop_macro_recording"):
-                result = await adapter.stop_macro_recording(input_data)
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Macro recording completed and saved",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to stop recording",
-                }
-
-            session_id = input_data.get("session_id", "")
-            save_path = input_data.get("save_path", "")
-            input_data.get("clean_code", True)
-
-            # Simulate recording completion
-            recorded_macro = {
-                "session_id": session_id,
-                "recording_duration": 125,  # seconds
-                "actions_recorded": 23,
-                "code_lines": 45,
-                "file_size": "3.2 KB",
-                "macro_path": save_path or f"C:\\Macros\\{session_id}.swp",
-                "complexity": "Medium",
-                "estimated_execution_time": "2.3 seconds",
-            }
-
-            macro_preview = """Sub RecordedMacro()
-    Dim swApp As SldWorks.SldWorks
-    Dim swModel As SldWorks.ModelDoc2
-    Dim swFeatMgr As SldWorks.FeatureManager
-
-    Set swApp = Application.SldWorks
-    Set swModel = swApp.ActiveDoc
-    Set swFeatMgr = swModel.FeatureManager
-
-    ' Recorded actions start here
-    swModel.SelectByID2 "Top Plane", "PLANE", 0, 0, 0, False, 0, Nothing, 0
-    swModel.SketchManager.InsertSketch True
-    swModel.SketchManager.CreateLine 0, 0, 0, 0.05, 0, 0
-    ' ... additional recorded actions ...
-
-End Sub"""
-
-            return {
-                "status": "success",
-                "message": "Macro recording completed and saved",
-                "recorded_macro": recorded_macro,
-                "macro_preview": macro_preview,
-                "optimization_suggestions": [
-                    "Consider parameterizing hardcoded values",
-                    "Add error handling for robustness",
-                    "Group similar operations for efficiency",
-                    "Add user prompts for dynamic input",
-                ],
-                "next_steps": [
-                    "Test the macro in a simple model",
-                    "Edit the code to add parameters if needed",
-                    "Add to macro library for reuse",
-                    "Document the macro purpose and usage",
-                ],
-            }
-
-        except Exception as e:
-            logger.error(f"Error in stop_macro_recording tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed to stop recording: {str(e)}",
+                "message": (
+                    "Stop a macro recording is not implemented. SolidWorks drives macro recording from its UI - use Tools > Macro > Stop."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in stop_macro_recording tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def execute_macro(input_data: MacroPlaybackInput) -> dict[str, Any]:
@@ -434,525 +366,91 @@ End Sub"""
 
     @mcp.tool()
     async def analyze_macro(input_data: MacroAnalysisInput) -> dict[str, Any]:
-        """Analyze a macro for complexity, dependencies, and optimization opportunities.
+        """Analyse a macro's contents.
 
-        This tool provides insights into macro structure and performance to help with
-        optimization and maintenance.
+        Not implemented.
 
-        Args:
-            input_data (MacroAnalysisInput): The input data value.
+        Previously: returned complexity scores, line counts and improvement suggestions for a macro file it never read. A .swp is a binary VBA project, so it cannot be parsed as text either.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await analyze_macro(analysis_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "analyze_macro"):
-                result = await adapter.analyze_macro(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Macro analysis completed for {input_data.macro_path}",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to analyze macro",
-                }
-
-            # Simulate macro analysis
-            analysis_results = {
-                "file_info": {
-                    "file_path": input_data.macro_path,
-                    "file_size": "4.7 KB",
-                    "last_modified": "2024-01-15 14:30:22",
-                    "encoding": "UTF-8",
-                },
-                "code_metrics": {
-                    "total_lines": 67,
-                    "code_lines": 52,
-                    "comment_lines": 8,
-                    "blank_lines": 7,
-                    "subroutines": 3,
-                    "variables": 12,
-                    "api_calls": 28,
-                },
-                "complexity_analysis": {
-                    "cyclomatic_complexity": 4,
-                    "complexity_level": "Medium",
-                    "decision_points": 3,
-                    "loop_structures": 1,
-                    "nested_levels": 2,
-                },
-                "dependencies": {
-                    "solidworks_apis": [
-                        "SldWorks.SldWorks",
-                        "SldWorks.ModelDoc2",
-                        "SldWorks.FeatureManager",
-                        "SldWorks.SketchManager",
-                    ],
-                    "external_references": [],
-                    "file_dependencies": [],
-                    "version_compatibility": ["SW2020+"],
-                },
-                "performance_insights": {
-                    "estimated_execution_time": "3.2 seconds",
-                    "bottleneck_operations": [
-                        "Sketch creation (35% of time)",
-                        "Feature rebuilds (45% of time)",
-                    ],
-                    "optimization_opportunities": [
-                        "Batch selection operations",
-                        "Minimize rebuilds",
-                        "Use more efficient API methods",
-                    ],
-                },
-                "quality_issues": [
-                    "Hardcoded values detected (line 23, 31)",
-                    "Missing error handling for API calls",
-                    "No user input validation",
-                ],
-                "suggestions": [
-                    "Add input parameter validation",
-                    "Implement error handling for robustness",
-                    "Consider making dimensions parametric",
-                    "Add progress feedback for long operations",
-                ],
-            }
-
-            return {
-                "status": "success",
-                "message": f"Macro analysis completed for {input_data.macro_path}",
-                "analysis": analysis_results,
-                "summary": {
-                    "overall_quality": "Good",
-                    "maintainability": "Medium",
-                    "reusability": "Medium",
-                    "performance": "Good",
-                },
-                "recommendations": {
-                    "immediate": "Add error handling",
-                    "short_term": "Parameterize hardcoded values",
-                    "long_term": "Modularize for better reusability",
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Error in analyze_macro tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed to analyze macro: {str(e)}",
+                "message": (
+                    "Analyse a macro's contents is not implemented. Open the macro in the VBA editor to inspect it."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in analyze_macro tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def batch_execute_macros(input_data: MacroBatchInput) -> dict[str, Any]:
-        """Handle batch execute macros.
+        """Run several macros in sequence.
 
-        This tool allows running multiple macros in sequence or parallel for complex automated
-        workflows.
+        Not implemented.
 
-        Args:
-            input_data (MacroBatchInput): The input data value.
+        Previously: reported per-macro run times and deliberately marked the third one failed, for macros it never executed.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await batch_execute_macros(batch_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            payload = (
-                input_data.model_dump()
-                if hasattr(input_data, "model_dump")
-                else dict(input_data)
-            )
-
-            if hasattr(adapter, "batch_execute_macros"):
-                result = await adapter.batch_execute_macros(payload)
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Batch macro execution completed successfully",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed batch execution",
-                }
-
-            macro_list = payload.get("macro_list", [])
-            execution_order = payload.get("execution_order", "sequential")
-            stop_on_error = payload.get("stop_on_error", True)
-            execution_results = []
-
-            for i, macro_path in enumerate(macro_list):
-                result = {
-                    "macro_index": i + 1,
-                    "macro_path": macro_path,
-                    "status": "success" if i != 2 else "error",  # Simulate one error
-                    "execution_time": 1.5 + (i * 0.3),
-                    "error_message": "File not found" if i == 2 else None,
-                }
-                execution_results.append(result)
-
-                # Stop on error if configured
-                if stop_on_error and result["status"] == "error":
-                    break
-
-            successful_runs = [r for r in execution_results if r["status"] == "success"]
-            failed_runs = [r for r in execution_results if r["status"] == "error"]
-
-            return {
-                "status": "success" if len(failed_runs) == 0 else "partial_success",
-                "message": f"Batch execution completed: {len(successful_runs)} success, {len(failed_runs)} failed",
-                "data": {
-                    "execution_order": execution_order,
-                    "stop_on_error": stop_on_error,
-                    "total_macros": len(macro_list),
-                    "successful_macros": len(successful_runs),
-                    "failed_macros": len(failed_runs),
-                },
-                "batch_execution": {
-                    "execution_order": execution_order,
-                    "stop_on_error": stop_on_error,
-                    "total_macros": len(macro_list),
-                    "successful_macros": len(successful_runs),
-                    "failed_macros": len(failed_runs),
-                },
-                "execution_results": execution_results,
-                "performance_summary": {
-                    "total_time": sum(r["execution_time"] for r in execution_results),
-                    "average_macro_time": sum(
-                        r["execution_time"] for r in successful_runs
-                    )
-                    / len(successful_runs)
-                    if successful_runs
-                    else 0,
-                    "success_rate": f"{len(successful_runs) / len(macro_list) * 100:.1f}%"
-                    if macro_list
-                    else "0.0%",
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Error in batch_execute_macros tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed batch execution: {str(e)}",
+                "message": (
+                    "Run several macros in sequence is not implemented. Run macros individually from the SolidWorks Macro toolbar."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in batch_execute_macros tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def optimize_macro(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Optimize an existing macro for better performance and reliability.
+        """Optimise a macro.
 
-        This tool analyzes and suggests improvements to existing macro code.
+        Not implemented.
 
-        Args:
-            input_data (dict[str, Any]): The input data value.
+        Previously: returned an estimated speed-up and a list of optimisations for a macro it never opened.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await optimize_macro(optimization_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            payload = (
-                input_data.model_dump()
-                if hasattr(input_data, "model_dump")
-                else dict(input_data)
-            )
-
-            if hasattr(adapter, "optimize_macro"):
-                result = await adapter.optimize_macro(payload)
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Macro optimization completed successfully",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to optimize macro",
-                }
-
-            macro_path = payload.get("macro_path") or payload.get("macro_file", "")
-            optimization_level = payload.get(
-                "level", "standard"
-            )  # basic, standard, aggressive
-
-            # Simulate optimization analysis
-            optimizations = {
-                "performance_improvements": [
-                    {
-                        "type": "API_EFFICIENCY",
-                        "description": "Replace multiple SelectByID2 calls with batch selection",
-                        "impact": "25% faster",
-                    },
-                    {
-                        "type": "REBUILD_OPTIMIZATION",
-                        "description": "Move rebuilds to end of operation",
-                        "impact": "15% faster",
-                    },
-                    {
-                        "type": "SELECTION_EFFICIENCY",
-                        "description": "Use direct object references instead of selection",
-                        "impact": "10% faster",
-                    },
-                ],
-                "reliability_improvements": [
-                    {
-                        "type": "ERROR_HANDLING",
-                        "description": "Add try-catch blocks for API calls",
-                        "impact": "Prevents crashes",
-                    },
-                    {
-                        "type": "VALIDATION",
-                        "description": "Add input parameter validation",
-                        "impact": "Prevents invalid operations",
-                    },
-                    {
-                        "type": "OBJECT_CHECKING",
-                        "description": "Verify objects exist before use",
-                        "impact": "Prevents null reference errors",
-                    },
-                ],
-                "maintainability_improvements": [
-                    {
-                        "type": "PARAMETERIZATION",
-                        "description": "Replace hardcoded values with variables",
-                        "impact": "Easier customization",
-                    },
-                    {
-                        "type": "MODULARIZATION",
-                        "description": "Break into smaller subroutines",
-                        "impact": "Better organization",
-                    },
-                    {
-                        "type": "DOCUMENTATION",
-                        "description": "Add comments and usage instructions",
-                        "impact": "Easier maintenance",
-                    },
-                ],
-            }
-
-            optimized_code_preview = """Sub OptimizedMacro()
-                ' Optimized version with improvements
-                Dim swApp As SldWorks.SldWorks
-                Dim swModel As SldWorks.ModelDoc2
-                Dim swFeatMgr As SldWorks.FeatureManager
-
-                ' Input validation
-                Set swApp = Application.SldWorks
-                If swApp Is Nothing Then
-                    MsgBox "SolidWorks not available"
-                    Exit Sub
-                End If
-
-                Set swModel = swApp.ActiveDoc
-                If swModel Is Nothing Then
-                    MsgBox "No active document"
-                    Exit Sub
-                End If
-
-                ' Disable rebuilds for performance
-                swModel.FeatureManager.EnableFeatureTree = False
-
-                ' ... optimized operations ...
-
-                ' Re-enable and rebuild once at end
-                swModel.FeatureManager.EnableFeatureTree = True
-                swModel.ForceRebuild3 False
-
-            End Sub"""
-
-            return {
-                "status": "success",
-                "message": f"Macro optimization analysis completed for {optimization_level} level",
-                "optimization_report": {
-                    "original_macro": macro_path,
-                    "optimization_level": optimization_level,
-                    "potential_improvements": optimizations,
-                    "estimated_performance_gain": "50% faster execution",
-                    "estimated_reliability_gain": "90% fewer runtime errors",
-                },
-                "optimized_code_preview": optimized_code_preview,
-                "implementation_priority": [
-                    "1. Add error handling (Critical)",
-                    "2. Optimize API calls (High)",
-                    "3. Add parameter validation (Medium)",
-                    "4. Improve documentation (Low)",
-                ],
-            }
-
-        except Exception as e:
-            logger.error(f"Error in optimize_macro tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed to optimize macro: {str(e)}",
+                "message": (
+                    "Optimise a macro is not implemented. Review the macro in the VBA editor."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in optimize_macro tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def create_macro_library(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Create a library of organized macros for team sharing and reuse.
+        """Create a macro library.
 
-        This tool sets up a structured macro library with categorization, documentation, and
-        version control.
+        Not implemented.
 
-        Args:
-            input_data (dict[str, Any]): The input data value.
+        Previously: reported a library created with a macro count, having written nothing.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await create_macro_library(library_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            payload = (
-                input_data.model_dump()
-                if hasattr(input_data, "model_dump")
-                else dict(input_data)
-            )
-
-            if hasattr(adapter, "create_macro_library"):
-                result = await adapter.create_macro_library(payload)
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Macro library created successfully",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to create library",
-                }
-
-            library_name = payload.get("library_name", "SolidWorks Macro Library")
-            library_path = payload.get("library_path", "C:\\MacroLibrary")
-            categories = payload.get(
-                "categories", ["Sketching", "Modeling", "Drawing", "Analysis", "Export"]
-            )
-            include_templates = payload.get("include_templates", True)
-
-            # Simulate library creation
-            library_structure = {
-                "library_info": {
-                    "name": "SolidWorks Macro Library",
-                    "path": library_path,
-                    "created": "2024-01-15",
-                    "version": "1.0.0",
-                    "total_macros": 0,
-                    "categories": categories,
-                },
-                "directory_structure": {
-                    "root": library_path,
-                    "folders": {
-                        "categories": [f"{library_path}\\{cat}" for cat in categories],
-                        "templates": f"{library_path}\\Templates",
-                        "documentation": f"{library_path}\\Documentation",
-                        "examples": f"{library_path}\\Examples",
-                        "utilities": f"{library_path}\\Utilities",
-                    },
-                },
-                "library_features": {
-                    "indexing": "Automatic macro cataloging",
-                    "search": "Full-text search capability",
-                    "version_control": "Git integration ready",
-                    "documentation": "Auto-generated documentation",
-                    "testing": "Automated macro testing framework",
-                },
-                "template_macros": [
-                    {
-                        "name": "BasicSketchTemplate.swp",
-                        "category": "Sketching",
-                        "description": "Template for basic sketch operations",
-                        "parameters": ["sketch_plane", "dimensions"],
-                    },
-                    {
-                        "name": "FeatureCreationTemplate.swp",
-                        "category": "Modeling",
-                        "description": "Template for creating parametric features",
-                        "parameters": ["feature_type", "dimensions", "materials"],
-                    },
-                    {
-                        "name": "DrawingSetupTemplate.swp",
-                        "category": "Drawing",
-                        "description": "Template for setting up drawing sheets",
-                        "parameters": ["sheet_format", "views", "annotations"],
-                    },
-                ]
-                if include_templates
-                else [],
-            }
-
-            # Create example index file content
-            library_index = {
-                "library_metadata": {
-                    "total_macros": 0,
-                    "last_updated": "2024-01-15",
-                    "maintainer": "Automation Team",
-                    "standards_version": "SW2024",
-                },
-                "macro_categories": {
-                    cat: {
-                        "count": 0,
-                        "description": f"Macros for {cat.lower()} operations",
-                    }
-                    for cat in categories
-                },
-                "usage_statistics": {
-                    "most_used": [],
-                    "recently_added": [],
-                    "needs_update": [],
-                },
-            }
-
-            return {
-                "status": "success",
-                "message": f"Macro library created successfully at {library_path}",
-                "data": {
-                    "library_name": library_name,
-                    "library_path": library_path,
-                    "categories_created": categories,
-                    "documentation_generated": True,
-                    "library_structure": library_structure,
-                    "library_index": library_index,
-                },
-                "setup_instructions": [
-                    "1. Install macros in appropriate category folders",
-                    "2. Update macro documentation in Documentation folder",
-                    "3. Run library indexer to catalog macros",
-                    "4. Set up version control for team sharing",
-                    "5. Configure automated testing for quality assurance",
-                ],
-                "next_steps": [
-                    "Add your first macros to the library",
-                    "Document macro usage and parameters",
-                    "Set up team access permissions",
-                    "Configure backup and sync procedures",
-                    "Train team members on library usage",
-                ],
-                "maintenance_guidelines": {
-                    "daily": "No action required",
-                    "weekly": "Review new macro submissions",
-                    "monthly": "Update library index and statistics",
-                    "quarterly": "Audit library for outdated macros",
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Error in create_macro_library tool: {e}")
             return {
                 "status": "error",
-                "message": f"Failed to create library: {str(e)}",
+                "message": (
+                    "Create a macro library is not implemented. Use save_to_template_library for a real, file-backed library of templates."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in create_macro_library tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     tool_count = 8  # Macro recording and management tools
     return tool_count

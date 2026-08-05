@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..adapters.base import SolidWorksAdapter
-from .input_compat import CompatInput
+from .input_compat import CompatInput, normalize_input
 
 # Input schemas for template management
 
@@ -172,24 +172,37 @@ async def register_template_management_tools(
 
     @mcp.tool()
     async def extract_template(input_data: TemplateExtractionInput) -> dict[str, Any]:
-        """Extract template from existing SolidWorks model.
+        """Write a document template from an existing model.
+
+        Copies the source model to ``save_path`` with the matching template
+        extension (``.prtdot`` / ``.asmdot`` / ``.drwdot``) and confirms the file
+        landed. That is what extracting a template amounts to in practice: the
+        model's document settings, custom properties and drafting standards travel
+        with the file.
+
+        It used to report a successful extraction while inventing the contents —
+        units "mm-kg-s", font "Century Gothic", and custom properties including
+        ``Material: Steel`` and ``RevisionLevel: A`` — for a model it never opened.
 
         Args:
-            input_data (TemplateExtractionInput): The input data value.
+            input_data (TemplateExtractionInput): Source model, name and save path.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await extract_template(extraction_input)
+            dict[str, Any]: The template file actually written.
         """
         try:
+            input_data = normalize_input(input_data, TemplateExtractionInput)
+            import shutil
+
             if hasattr(adapter, "extract_template"):
                 result = await adapter.extract_template(input_data.model_dump())
                 if result.is_success:
                     return {
                         "status": "success",
-                        "message": f"Template '{input_data.template_name}' extracted from {input_data.source_model}",
+                        "message": (
+                            f"Template '{input_data.template_name}' extracted "
+                            f"from {input_data.source_model}"
+                        ),
                         "data": result.data,
                         "execution_time": result.execution_time,
                     }
@@ -198,47 +211,63 @@ async def register_template_management_tools(
                     "message": result.error or "Failed to extract template",
                 }
 
-            # For now, return a structured response that describes what would be done
-            # In full implementation, this would use the SolidWorks API to extract settings
+            source = Path(str(input_data.source_model))
+            if not source.exists():
+                return {
+                    "status": "error",
+                    "message": f"Source model not found: {input_data.source_model}",
+                }
 
-            extracted_properties = {
-                "document_properties": {
-                    "units": "mm-kg-s",
-                    "precision": 2,
-                    "annotation_font": "Century Gothic",
-                    "dimension_style": "ISO",
-                },
-                "custom_properties": [
-                    {"name": "Material", "type": "text", "value": "Steel"},
-                    {"name": "Weight", "type": "number", "expression": "SW-Mass"},
-                    {"name": "DrawingNo", "type": "text", "value": ""},
-                    {"name": "RevisionLevel", "type": "text", "value": "A"},
-                ],
-                "dimension_settings": {
-                    "decimal_places": input_data.include_dimensions,
-                    "trailing_zeros": True,
-                    "units_display": True,
-                },
+            extensions = {
+                "part": ".prtdot",
+                "assembly": ".asmdot",
+                "drawing": ".drwdot",
             }
+            template_type = str(input_data.template_type or "part").strip().lower()
+            if template_type not in extensions:
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Unknown template_type '{input_data.template_type}'. "
+                        f"Use one of: {', '.join(sorted(extensions))}."
+                    ),
+                }
+
+            destination = Path(str(input_data.save_path))
+            if destination.is_dir() or not destination.suffix:
+                destination = destination / (
+                    str(input_data.template_name) + extensions[template_type]
+                )
+            elif destination.suffix.lower() != extensions[template_type]:
+                destination = destination.with_suffix(extensions[template_type])
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+
+            if not destination.exists():
+                return {
+                    "status": "error",
+                    "message": f"Template was not written to {destination}",
+                }
 
             return {
                 "status": "success",
-                "message": f"Template '{input_data.template_name}' extracted from {input_data.source_model}",
+                "message": (
+                    f"Template '{input_data.template_name}' written to "
+                    f"{destination.name}"
+                ),
                 "template": {
                     "name": input_data.template_name,
-                    "type": input_data.template_type,
-                    "save_path": input_data.save_path,
-                    "extracted_properties": extracted_properties,
-                    "property_count": len(extracted_properties["custom_properties"]),
-                    "includes_dimensions": input_data.include_dimensions,
-                    "includes_custom_properties": input_data.include_custom_properties,
+                    "type": template_type,
+                    "source_model": str(source),
+                    "file_location": str(destination),
+                    "size_bytes": destination.stat().st_size,
                 },
-                "usage_instructions": [
-                    "1. Template file saved to specified path",
-                    "2. Use apply_template to apply to other models",
-                    "3. Template includes document formatting and properties",
-                    "4. Can be added to template library for reuse",
-                ],
+                "note": (
+                    "The template carries whatever document settings and custom "
+                    "properties the source model had. They are not enumerated "
+                    "here - open the template to inspect them."
+                ),
             }
 
         except Exception as e:
@@ -250,156 +279,49 @@ async def register_template_management_tools(
 
     @mcp.tool()
     async def apply_template(input_data: TemplateApplicationInput) -> dict[str, Any]:
-        """Apply a template to an existing SolidWorks model.
+        """Apply a template to a model.
 
-        This tool applies saved template settings including properties, dimensions, and
-        formatting to the target model.
+        Not implemented.
 
-        Args:
-            input_data (TemplateApplicationInput): The input data value.
+        Previously: reported properties, materials and features applied to a model it never opened.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await apply_template(application_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "apply_template"):
-                result = await adapter.apply_template(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Template applied to {input_data.target_model}",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed to apply template",
-                }
-
-            # Simulate template application process
-            applied_changes = {
-                "properties_updated": [
-                    "Material → Steel",
-                    "DrawingNo → DRW-001",
-                    "RevisionLevel → A",
-                ],
-                "dimension_formatting": {
-                    "precision_updated": True,
-                    "units_format_applied": True,
-                    "font_updated": "Century Gothic",
-                },
-                "document_settings": {
-                    "units_system": "mm-kg-s",
-                    "drafting_standard": "ISO",
-                },
-            }
-
-            return {
-                "status": "success",
-                "message": f"Template applied to {input_data.target_model}",
-                "template_application": {
-                    "template_path": input_data.template_path,
-                    "target_model": input_data.target_model,
-                    "changes_applied": applied_changes,
-                    "overwrite_mode": input_data.overwrite_existing,
-                    "material_applied": input_data.apply_materials,
-                    "dimensions_applied": input_data.apply_dimensions,
-                },
-                "recommendations": [
-                    "Rebuild the model to update all features",
-                    "Check custom properties in File > Properties",
-                    "Verify dimension formatting in drawings",
-                    "Save the model to preserve changes",
-                ],
-            }
-
-        except Exception as e:
-            logger.error(f"Error in apply_template tool: {e}")
+            input_data = normalize_input(input_data, TemplateApplicationInput)
             return {
                 "status": "error",
-                "message": f"Failed to apply template: {str(e)}",
+                "message": (
+                    "Apply a template to a model is not implemented. Create documents from the template instead - create_part and create_assembly use the configured SolidWorks templates."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in apply_template tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def batch_apply_template(input_data: TemplateBatchInput) -> dict[str, Any]:
-        """Apply template to multiple models in batch.
+        """Apply a template across many files.
 
-        This tool processes multiple SolidWorks files and applies the same template
-        configuration to all matching files.
+        Not implemented.
 
-        Args:
-            input_data (TemplateBatchInput): The input data value.
+        Previously: reported a per-file success count for files it never opened.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
-
-        Example:
-                            >>> result = await batch_apply_template(batch_input)
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "batch_apply_template"):
-                result = await adapter.batch_apply_template(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Batch template application completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Failed batch template application",
-                }
-
-            # Simulate batch processing
-            processed_files = [
-                {"file": "part001.sldprt", "status": "success", "changes": 5},
-                {"file": "part002.sldprt", "status": "success", "changes": 4},
-                {"file": "assembly001.sldasm", "status": "success", "changes": 3},
-                {
-                    "file": "drawing001.slddrw",
-                    "status": "skipped",
-                    "reason": "Wrong file type",
-                },
-            ]
-
-            summary = {
-                "total_processed": len(
-                    [f for f in processed_files if f["status"] == "success"]
-                ),
-                "total_scanned": len(processed_files),
-                "total_changes": sum(f.get("changes", 0) for f in processed_files),
-                "backup_created": input_data.backup_originals,
-            }
-
-            return {
-                "status": "success",
-                "message": f"Batch template application completed on {summary['total_processed']} files",
-                "batch_operation": {
-                    "template_path": input_data.template_path,
-                    "source_folder": input_data.source_folder,
-                    "file_pattern": input_data.file_pattern,
-                    "recursive": input_data.recursive,
-                    "summary": summary,
-                    "processed_files": processed_files,
-                },
-                "performance": {
-                    "efficiency": f"{summary['total_changes']} changes across {summary['total_processed']} files",
-                    "backup_status": "Created"
-                    if input_data.backup_originals
-                    else "Not created",
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Error in batch_apply_template tool: {e}")
+            input_data = normalize_input(input_data, TemplateBatchInput)
             return {
                 "status": "error",
-                "message": f"Failed batch template application: {str(e)}",
+                "message": (
+                    "Apply a template across many files is not implemented. Create documents from the template instead, or use batch_process_files for a real per-file operation."
+                ),
             }
+        except Exception as e:
+            logger.error(f"Error in batch_apply_template tool: {e}")
+            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
     @mcp.tool()
     async def compare_templates(input_data: TemplateComparisonInput) -> dict[str, Any]:
@@ -419,6 +341,7 @@ async def register_template_management_tools(
             dict[str, Any]: File-level comparison, or an error.
         """
         try:
+            input_data = normalize_input(input_data, TemplateComparisonInput)
             import hashlib
             from datetime import datetime, timezone
             from pathlib import Path

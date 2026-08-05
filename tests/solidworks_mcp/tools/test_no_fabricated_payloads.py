@@ -45,9 +45,21 @@ ADAPTER_FREE_TOOLS = {
     "create_section_view",
     "create_detail_view",
     "check_drawing_standards",
-    # File-level comparisons that need no SolidWorks session.
+    "execute_workflow",
+    "manage_design_table",
+    "optimize_performance",
+    "analyze_macro",
+    "batch_execute_macros",
+    "optimize_macro",
+    "create_macro_library",
+    "apply_template",
+    "batch_apply_template",
+    # File-level work that needs no SolidWorks session: comparisons read the
+    # files, and the template tools copy a model to a template file.
     "compare_drawing_versions",
     "compare_templates",
+    "create_template",
+    "extract_template",
 }
 
 
@@ -86,7 +98,15 @@ def test_no_new_tools_fabricate_their_answer() -> None:
 
 def test_no_simulation_markers_left_in_tools() -> None:
     """No tool still advertises that it is faking its result."""
-    markers = ("# For now, simulate", "# Simulated", "# Would be actual")
+    # "# Simulate " (imperative) slipped past an earlier version of this check
+    # that only looked for "# For now, simulate" — five automation tools were
+    # still inventing their entire answer behind it.
+    markers = (
+        "# For now, simulate",
+        "# Simulate ",
+        "# Simulated",
+        "# Would be actual",
+    )
     found: list[str] = []
     for path in sorted(TOOLS_DIR.glob("*.py")):
         text = path.read_text(encoding="utf-8")

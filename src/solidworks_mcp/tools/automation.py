@@ -14,7 +14,13 @@ from loguru import logger
 from pydantic import Field
 
 from ..adapters.base import SolidWorksAdapter
-from .input_compat import CompatInput
+from .input_compat import (
+    CompatInput,
+    normalize_input as _normalize_input,
+)
+
+
+
 
 # Input schemas using Python 3.14 built-in types
 
@@ -305,6 +311,7 @@ async def register_automation_tools(
                             ```
         """
         try:
+            input_data = _normalize_input(input_data, GenerateVBAInput)
             if hasattr(adapter, "generate_vba_code"):
                 result = await adapter.generate_vba_code(input_data.model_dump())
                 if result.is_success:
@@ -319,7 +326,9 @@ async def register_automation_tools(
                     "message": result.error or "Failed to generate VBA code",
                 }
 
-            # Simulate VBA code generation based on operation description
+            # A skeleton, not a working macro: connection boilerplate,
+            # optional error handling, and a TODO where the operation goes.
+            # The response says so rather than implying it is runnable.
             sample_vba = f"""
 ' Generated VBA code for: {input_data.operation_description}
 ' Target: {input_data.target_document}
@@ -451,49 +460,129 @@ End Sub
 
     @mcp.tool()
     async def batch_process_files(input_data: BatchProcessInput) -> dict[str, Any]:
-        """Handle batch process files.
+        """Run one operation over every matching file in a directory.
 
-        This tool processes multiple files in a directory, performing operations like rebuild,
-        save as, export, or property updates.
+        Really opens each file, performs the operation and closes it, then reports
+        what actually happened — which files were found, which succeeded, and the
+        real error for each failure.
+
+        Supported ``operation_type`` values: ``export`` (needs ``target_format``)
+        and ``open`` (open-and-close, useful as a bulk health check on a folder).
+        Anything else is rejected rather than reported as done.
+
+        This tool used to invent its whole answer: 25 files found, 23 processed,
+        "12.5 minutes", and two named failures — ``corrupted_part.sldprt`` and
+        ``locked_assembly.sldasm`` — for a directory it never read. Someone would
+        go looking for those files.
 
         Args:
-            input_data (BatchProcessInput): The input data value.
+            input_data (BatchProcessInput): Directory, operation and filters.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
+            dict[str, Any]: Real per-file results.
         """
         try:
-            if hasattr(adapter, "batch_process_files"):
-                result = await adapter.batch_process_files(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Batch {input_data.operation_type} completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
+            input_data = _normalize_input(input_data, BatchProcessInput)
+            import time as _time
+            from pathlib import Path as _Path
+
+            source = str(getattr(input_data, "source_directory", "") or "").strip()
+            if not source:
+                return {"status": "error", "message": "source_directory is required"}
+            directory = _Path(source)
+            if not directory.is_dir():
                 return {
                     "status": "error",
-                    "message": result.error or "Batch processing failed",
+                    "message": f"Not a directory: {source}",
                 }
 
-            # Simulate batch processing
+            operation = str(
+                getattr(input_data, "operation_type", None)
+                or getattr(input_data, "operation", None)
+                or "open"
+            ).strip().lower()
+            supported = {"export", "open"}
+            if operation not in supported:
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Unsupported operation '{operation}'. "
+                        f"Supported: {', '.join(sorted(supported))}."
+                    ),
+                }
+
+            target_format = str(
+                getattr(input_data, "target_format", "") or ""
+            ).strip().lower()
+            if operation == "export" and not target_format:
+                return {
+                    "status": "error",
+                    "message": "export requires target_format (step, stl, iges, pdf)",
+                }
+
+            pattern = str(getattr(input_data, "file_pattern", "") or "").strip()
+            recursive = bool(getattr(input_data, "recursive", False))
+            globber = directory.rglob if recursive else directory.glob
+            candidates = sorted(
+                path
+                for path in globber(pattern or "*")
+                if path.suffix.lower() in (".sldprt", ".sldasm", ".slddrw")
+                # SolidWorks writes "~$name.sldprt" lock files next to open
+                # documents. They match the extension but are not documents.
+                and not path.name.startswith("~$")
+            )
+
+            if not candidates:
+                return {
+                    "status": "error",
+                    "message": (
+                        f"No SolidWorks files found in {source}"
+                        + (f" matching '{pattern}'" if pattern else "")
+                    ),
+                }
+
+            started = _time.perf_counter()
+            succeeded: list[str] = []
+            failed: list[dict[str, str]] = []
+
+            for path in candidates:
+                opened = await adapter.open_model(str(path))
+                if not opened.is_success:
+                    failed.append({"file": path.name, "error": str(opened.error)})
+                    continue
+                try:
+                    if operation == "export":
+                        exported = await adapter.export_file(
+                            str(path.with_suffix("." + target_format)),
+                            target_format,
+                        )
+                        if not exported.is_success:
+                            failed.append(
+                                {"file": path.name, "error": str(exported.error)}
+                            )
+                            continue
+                    succeeded.append(path.name)
+                except Exception as exc:  # noqa: BLE001 - per-file isolation
+                    failed.append({"file": path.name, "error": str(exc)})
+                finally:
+                    await adapter.close_model(False)
+
+            elapsed = _time.perf_counter() - started
             return {
-                "status": "success",
-                "message": f"Batch {input_data.operation_type} completed",
+                "status": "success" if not failed else "partial",
+                "message": (
+                    f"{len(succeeded)}/{len(candidates)} file(s) {operation}ed"
+                ),
                 "batch_process": {
-                    "source_directory": input_data.source_directory,
-                    "operation": input_data.operation_type,
-                    "target_format": input_data.target_format,
-                    "files_found": 25,
-                    "files_processed": 23,
-                    "files_successful": 21,
-                    "files_failed": 2,
-                    "processing_time": "12.5 minutes",
-                    "failed_files": [
-                        {"file": "corrupted_part.sldprt", "error": "File corrupted"},
-                        {"file": "locked_assembly.sldasm", "error": "File locked"},
-                    ],
+                    "source_directory": str(directory),
+                    "operation": operation,
+                    "target_format": target_format or None,
+                    "files_found": len(candidates),
+                    "files_successful": len(succeeded),
+                    "files_failed": len(failed),
+                    "processing_seconds": round(elapsed, 2),
+                    "succeeded": succeeded,
+                    "failed_files": failed,
                 },
             }
 
@@ -506,46 +595,36 @@ End Sub
 
     @mcp.tool()
     async def manage_design_table(input_data: DesignTableInput) -> dict[str, Any]:
-        """Create or manage design tables for parametric modeling.
+        """Create or edit a model's design table.
 
-        Design tables allow you to create multiple configurations of a part or assembly by
-        driving parameters from an Excel spreadsheet.
+        Not implemented. Design tables are driven through an embedded Excel
+        worksheet, which this adapter cannot reach.
+
+        It previously echoed the requested parameters back inside a success
+        payload, counting "configurations" it had not created.
 
         Args:
-            input_data (DesignTableInput): The input data value.
+            input_data (DesignTableInput): The requested table operation.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "manage_design_table"):
-                result = await adapter.manage_design_table(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Design table {input_data.table_type} completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Design table management failed",
-                }
-
-            # Simulate design table management
+            input_data = _normalize_input(input_data, DesignTableInput)
             return {
-                "status": "success",
-                "message": f"Design table {input_data.table_type} completed",
-                "design_table": {
-                    "operation": input_data.table_type,
-                    "excel_file": input_data.excel_file,
-                    "parameters": input_data.parameters,
-                    "configurations": input_data.configurations,
-                    "total_configurations": len(input_data.configurations),
-                    "parameters_controlled": len(input_data.parameters),
+                "status": "error",
+                "message": (
+                    "Design table management is not implemented: it needs the "
+                    "embedded Excel worksheet, which this adapter cannot reach. "
+                    "Edit the design table in SolidWorks, or drive configurations "
+                    "with set_dimension."
+                ),
+                "requested": {
+                    "operation": getattr(input_data, "table_type", None)
+                    or getattr(input_data, "operation", None),
+                    "model_path": getattr(input_data, "model_path", None),
                 },
             }
-
         except Exception as e:
             logger.error(f"Error in manage_design_table tool: {e}")
             return {
@@ -555,51 +634,34 @@ End Sub
 
     @mcp.tool()
     async def execute_workflow(input_data: WorkflowInput) -> dict[str, Any]:
-        """Handle execute workflow.
+        """Run a named sequence of steps.
 
-        This tool executes a series of automated steps in sequence, with support for parallel
-        execution and error handling.
+        Not implemented. There is no step executor behind this tool, so it cannot
+        run a workflow.
+
+        It used to report per-step durations ("2.1s", "1.8s") and a plausible
+        failure ("step 3 failed: File not found") for a workflow it never ran.
 
         Args:
-            input_data (WorkflowInput): The input data value.
+            input_data (WorkflowInput): The workflow definition.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
+            dict[str, Any]: An error naming the alternative.
         """
         try:
-            if hasattr(adapter, "execute_workflow"):
-                result = await adapter.execute_workflow(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Workflow '{input_data.workflow_name}' completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Workflow execution failed",
-                }
-
-            # Simulate workflow execution
+            input_data = _normalize_input(input_data, WorkflowInput)
             return {
-                "status": "success",
-                "message": f"Workflow '{input_data.workflow_name}' completed",
-                "workflow": {
-                    "name": input_data.workflow_name,
-                    "total_steps": len(input_data.steps),
-                    "completed_steps": len(input_data.steps) - 1,
-                    "failed_steps": 1,
-                    "parallel_execution": input_data.parallel_execution,
-                    "execution_time": "8.3 minutes",
-                    "step_results": [
-                        {"step": 1, "status": "success", "duration": "2.1s"},
-                        {"step": 2, "status": "success", "duration": "1.8s"},
-                        {"step": 3, "status": "failed", "error": "File not found"},
-                    ],
+                "status": "error",
+                "message": (
+                    "Workflow execution is not implemented - there is no step "
+                    "executor behind this tool. Call the individual tools in "
+                    "sequence instead."
+                ),
+                "requested": {
+                    "workflow_name": getattr(input_data, "workflow_name", None),
+                    "step_count": len(getattr(input_data, "steps", []) or []),
                 },
             }
-
         except Exception as e:
             logger.error(f"Error in execute_workflow tool: {e}")
             return {
@@ -609,42 +671,92 @@ End Sub
 
     @mcp.tool()
     async def create_template(input_data: TemplateInput) -> dict[str, Any]:
-        """Create a SolidWorks template file.
+        """Create a document template from an existing model file.
 
-        This tool creates templates for parts, assemblies, or drawings with standardized
-        settings, materials, and configurations.
+        Copies the base model to the template location with the matching template
+        extension (``.prtdot`` / ``.asmdot`` / ``.drwdot``) and confirms the file
+        was written.
+
+        It previously reported a template created at a
+        ``C:\\ProgramData\\SolidWorks\\templates\\...`` path that it never wrote,
+        so the next call that tried to use that template would fail with a
+        confusing "template not found".
 
         Args:
-            input_data (TemplateInput): The input data value.
+            input_data (TemplateInput): Template type, name and base file.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
+            dict[str, Any]: The template path actually written.
         """
         try:
-            if hasattr(adapter, "create_template"):
-                result = await adapter.create_template(input_data.model_dump())
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": f"Created {input_data.template_type} template: {input_data.template_name}",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
+            input_data = _normalize_input(input_data, TemplateInput)
+            import shutil
+            from pathlib import Path as _Path
+
+            base = str(
+                getattr(input_data, "base_file", None)
+                or getattr(input_data, "source_model", None)
+                or ""
+            ).strip()
+            if not base:
                 return {
                     "status": "error",
-                    "message": result.error or "Template creation failed",
+                    "message": (
+                        "base_file is required: a template is created from an "
+                        "existing model"
+                    ),
+                }
+            base_path = _Path(base)
+            if not base_path.exists():
+                return {"status": "error", "message": f"Base file not found: {base}"}
+
+            template_type = str(
+                getattr(input_data, "template_type", "part") or "part"
+            ).strip().lower()
+            extensions = {
+                "part": ".prtdot",
+                "assembly": ".asmdot",
+                "drawing": ".drwdot",
+            }
+            if template_type not in extensions:
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Unknown template_type '{template_type}'. "
+                        f"Use one of: {', '.join(sorted(extensions))}."
+                    ),
                 }
 
-            # Simulate template creation
+            name = str(
+                getattr(input_data, "template_name", "") or base_path.stem
+            ).strip()
+            output = getattr(input_data, "output_path", None)
+            destination = (
+                _Path(str(output))
+                if output
+                else base_path.with_name(name).with_suffix(extensions[template_type])
+            )
+            if destination.suffix.lower() != extensions[template_type]:
+                destination = destination.with_suffix(extensions[template_type])
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(base_path, destination)
+
+            if not destination.exists():
+                return {
+                    "status": "error",
+                    "message": f"Template was not written to {destination}",
+                }
+
             return {
                 "status": "success",
-                "message": f"Created {input_data.template_type} template: {input_data.template_name}",
+                "message": f"Created {template_type} template: {destination.name}",
                 "template": {
-                    "type": input_data.template_type,
-                    "name": input_data.template_name,
-                    "base_file": input_data.base_file,
-                    "metadata": input_data.metadata,
-                    "file_location": f"C:\\ProgramData\\SolidWorks\\templates\\{input_data.template_name}.{'sldprt' if input_data.template_type == 'part' else 'sldasm' if input_data.template_type == 'assembly' else 'slddrw'}t",
+                    "type": template_type,
+                    "name": name,
+                    "base_file": str(base_path),
+                    "file_location": str(destination),
+                    "size_bytes": destination.stat().st_size,
                 },
             }
 
@@ -657,54 +769,30 @@ End Sub
 
     @mcp.tool()
     async def optimize_performance(input_data: dict[str, Any]) -> dict[str, Any]:
-        """Optimize SolidWorks performance settings.
+        """Report SolidWorks performance-related settings.
 
-        This tool analyzes the current SolidWorks configuration and suggests or applies
-        performance optimizations.
+        Not implemented as an optimiser. Changing performance preferences is not
+        something this adapter should do silently on a user's installation, and
+        the previous version did not do it anyway: it reported "45 settings
+        analyzed, 12 optimized, estimated 25% performance gain" without reading
+        or writing a single setting.
 
         Args:
-            input_data (dict[str, Any]): The input data value.
+            input_data (dict[str, Any]): Ignored.
 
         Returns:
-            dict[str, Any]: A dictionary containing the resulting values.
+            dict[str, Any]: An error naming where these settings live.
         """
         try:
-            if hasattr(adapter, "optimize_performance"):
-                result = await adapter.optimize_performance(input_data)
-                if result.is_success:
-                    return {
-                        "status": "success",
-                        "message": "Performance optimization completed",
-                        "data": result.data,
-                        "execution_time": result.execution_time,
-                    }
-                return {
-                    "status": "error",
-                    "message": result.error or "Performance optimization failed",
-                }
-
-            # Simulate performance optimization
             return {
-                "status": "success",
-                "message": "Performance optimization completed",
-                "optimization": {
-                    "settings_analyzed": 45,
-                    "settings_optimized": 12,
-                    "estimated_performance_gain": "25%",
-                    "optimizations": [
-                        "Disabled real-time visualization for large assemblies",
-                        "Increased graphics cache size",
-                        "Optimized rebuild frequency",
-                        "Enabled lightweight components for large assemblies",
-                    ],
-                    "recommendations": [
-                        "Consider upgrading graphics card",
-                        "Increase available RAM",
-                        "Use Pack and Go for better file management",
-                    ],
-                },
+                "status": "error",
+                "message": (
+                    "Performance optimisation is not implemented. The previous "
+                    "figures - settings analysed, percentage gain - were "
+                    "fabricated and read no settings at all. Adjust these in "
+                    "SolidWorks under Tools > Options > Performance."
+                ),
             }
-
         except Exception as e:
             logger.error(f"Error in optimize_performance tool: {e}")
             return {

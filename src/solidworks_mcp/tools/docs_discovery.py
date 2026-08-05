@@ -17,7 +17,10 @@ from typing import Any, TypeVar
 from loguru import logger
 from pydantic import Field
 
-from .input_compat import CompatInput
+from .input_compat import (
+    CompatInput,
+    normalize_input as _normalize_input,
+)
 
 try:
     import win32com.client
@@ -663,25 +666,6 @@ class SearchApiHelpInput(CompatInput):
 CompatInputT = TypeVar("CompatInputT", bound=CompatInput)
 
 
-def _normalize_input(input_data: Any, model_type: type[CompatInputT]) -> CompatInputT:
-    """Normalize dict/model payloads for direct tool invocation paths.
-
-    Args:
-        input_data (Any): The input data value.
-        model_type (type[CompatInputT]): The model type value.
-
-    Returns:
-        CompatInputT: The result produced by the operation.
-    """
-    if input_data is None:
-        return model_type()
-    if isinstance(input_data, model_type):
-        return input_data
-    if isinstance(input_data, dict):
-        return model_type.model_validate(input_data)
-    if hasattr(input_data, "model_dump"):
-        return model_type.model_validate(input_data.model_dump())
-    return model_type.model_validate(input_data)
 
 
 def _extract_year(value: str | None) -> int | None:
