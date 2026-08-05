@@ -612,12 +612,14 @@ class SolidWorksIOMixin:
             # swDefaultTemplateDrawing is preference 10. Index 1 was being read
             # here, which is empty on a stock install, so NewDocument got ""
             # and every create_drawing call failed.
-            drw_template = self._resolve_template_path([10, 6], ".drwdot")
+            drw_template = self._resolve_template_path([10, 1, 6], ".drwdot")
             if not drw_template:
-                raise Exception(
-                    "No drawing template configured in SolidWorks "
-                    "(Tools > Options > File Locations > Document Templates)"
+                # Last resort: derive it from the part template's location.
+                part_template = adapter._attempt(
+                    lambda: app.GetUserPreferenceStringValue(8), default=""
                 )
+                if isinstance(part_template, str) and part_template:
+                    drw_template = part_template.replace("Part", "Drawing")
 
             model = app.NewDocument(drw_template, 12, 0.2794, 0.2159)
             if not model:

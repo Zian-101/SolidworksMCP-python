@@ -1299,8 +1299,17 @@ class _FeatureSelectionService:
                 return attr
             try:
                 return attr()
-            except Exception:
+            except TypeError:
+                # Already resolved to a value; the value is not callable.
                 return attr
+            except Exception as exc:
+                # A COM object value is callable and raises com_error on call
+                # ("Member not found") - that is still the value. Any other
+                # failure is real: returning the bound method there produced a
+                # junk feature entry and hid the fallback traversal.
+                if type(exc).__name__ == "com_error":
+                    return attr
+                return None
 
         self._adapter._attempt(
             lambda: sw_type_info.flag_methods(
@@ -1388,8 +1397,17 @@ class _FeatureSelectionService:
                 return attr
             try:
                 return attr()
-            except Exception:
+            except TypeError:
+                # Already resolved to a value; the value is not callable.
                 return attr
+            except Exception as exc:
+                # A COM object value is callable and raises com_error on call
+                # ("Member not found") - that is still the value. Any other
+                # failure is real: returning the bound method there produced a
+                # junk feature entry and hid the fallback traversal.
+                if type(exc).__name__ == "com_error":
+                    return attr
+                return None
 
         name = str(self._adapter._attempt(lambda: _member(feature, "Name"), default="") or "")
         feature_type = str(

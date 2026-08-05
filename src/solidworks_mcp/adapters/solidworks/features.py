@@ -516,6 +516,12 @@ def _create_revolve_impl(
                 True,
             )
 
+        # When SolidWorks hands back nothing at all, say so plainly. Falling
+        # through to the volume check reported "produced no geometry" with a
+        # pair of volumes, which describes the symptom rather than the cause.
+        if not feature:
+            raise Exception("Failed to create revolve feature")
+
         # Verify real material appeared rather than trusting the COM return
         # value, which can be a Feature object (or void) for a revolve that
         # produced nothing.
@@ -642,27 +648,39 @@ def _read_member(obj: Any, name: str) -> Any:
 
     Late-bound pywin32 dispatches are inconsistent: an unflagged zero-arg
     accessor may come back as a bound method (needing a call) *or* as the
-    already-resolved value â€” and when that value is itself a COM object it is
+    already-resolved value - and when that value is itself a COM object it is
     also callable, so a naive "call if callable" check wrongly invokes its
     default dispatch (``Member not found``).  This helper calls the member and
-    falls back to the raw member if the call raises, so it yields the value in
-    every case (flagged method, unflagged method, property-returning-object,
-    or plain test double).
+    falls back to the raw member only for those two shapes.
+
+    It deliberately does **not** fall back on every exception.  Doing so turned
+    a genuinely failing call into a "value" that happened to be the bound
+    method itself, which then flowed onward as a feature name or type -
+    producing entries like ``type: '<bound method ...>'`` and, worse, a junk
+    feature that made the caller think the tree walk had succeeded.
 
     Args:
         obj: The COM object (or test double) to read from.
         name: Member name.
 
     Returns:
-        Any: The member's value, or ``None`` when the attribute is absent.
+        Any: The member's value, ``None`` when the attribute is absent, and
+        ``None`` when calling it failed for a real reason.
     """
     member = getattr(obj, name, None)
     if not callable(member):
         return member
     try:
         return member()
-    except Exception:
+    except TypeError:
+        # pywin32 already resolved this to a value; the value is not callable.
         return member
+    except Exception as exc:
+        # A COM *object* value is callable, and calling it raises com_error
+        # ("Member not found"). That one is still the value we want.
+        if type(exc).__name__ == "com_error":
+            return member
+        return None
 
 
 def _profile_feature_names(adapter: Any) -> list[str]:
@@ -3026,7 +3044,15 @@ def _create_cut_extrude_impl(
         # than making the caller guess which way points "into" the material we
         # simply try the other side.
         flipped = not cut_direction
-        if not feature or _model_volume(adapter) >= volume_before * 0.999:
+        # Only retry when the volume is actually measurable. Without mass
+        # properties _model_volume returns 0.0, and "0.0 >= 0.0" made this fire
+        # on every cut - deleting a perfectly good feature and then reporting
+        # failure when the flipped retry returned nothing.
+        volume_says_no_op = bool(volume_before) and (
+            _model_volume(adapter) >= volume_before * 0.999
+        )
+        original_feature = feature
+        if not feature or volume_says_no_op:
             if feature:
                 # Remove the no-op cut before retrying so the tree stays clean.
                 adapter._attempt(
@@ -3104,8 +3130,13 @@ def _create_cut_extrude_impl(
             )
             if retry_error is not None:
                 fallback_errors.append(f"FeatureCut4 (flipped): {retry_error}")
-            else:
+            elif feature:
                 cut_direction = flipped
+            elif original_feature is not None and not volume_says_no_op:
+                # The retry produced nothing, but the first attempt had already
+                # succeeded and was not a measured no-op. Keep it rather than
+                # discarding a real feature.
+                feature = original_feature
 
         if not feature:
             if fallback_errors:

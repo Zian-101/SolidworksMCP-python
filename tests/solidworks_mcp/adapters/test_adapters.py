@@ -1023,6 +1023,20 @@ class TestPyWin32AdapterBranches:
                 merge_result=True,
             )
         )
+        # create_revolve now proves the revolve added material instead of
+        # trusting the COM return value, and this double reports a fixed
+        # volume. Grow it between reads so the check can pass; the guard
+        # itself is covered by test_create_extrusion_and_revolve_feature_none_errors.
+        _revolve_volume = iter([4.0e-9, 9.0e-9, 9.0e-9, 9.0e-9, 9.0e-9])
+
+        def _growing_mass_properties():
+            """Mass-property tuple whose volume grows after the revolve."""
+            volume = next(_revolve_volume, 9.0e-9)
+            return (0.001, 0.002, 0.003, volume, 7.0e-6, 0.5,
+                    11.0, 22.0, 33.0, 44.0, 55.0, 66.0)
+
+        adapter.currentModel.GetMassProperties = _growing_mass_properties
+
         revolve = await adapter.create_revolve(
             SimpleNamespace(
                 angle=180.0,
@@ -1377,9 +1391,9 @@ class TestPyWin32AdapterBranches:
         fillet_select_fail = await adapter.add_fillet(1.0, ["Edge1"])
         chamfer_select_fail = await adapter.add_chamfer(1.0, ["Edge1"])
         assert fillet_select_fail.is_error
-        assert "Failed to select edge" in (fillet_select_fail.error or "")
+        assert "Failed to select any of the named edge" in (fillet_select_fail.error or "")
         assert chamfer_select_fail.is_error
-        assert "Failed to select edge" in (chamfer_select_fail.error or "")
+        assert "Failed to select any of the named edge" in (chamfer_select_fail.error or "")
 
         model.Extension.SelectByID2 = Mock(return_value=True)
         fillet_create_fail = await adapter.add_fillet(1.0, ["Edge1"])

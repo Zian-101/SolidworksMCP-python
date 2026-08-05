@@ -185,7 +185,9 @@ filterwarnings = [
     "ignore::PendingDeprecationWarning",
     "ignore::sqlalchemy.exc.SAWarning",
 ]
-collect_ignore = ["setup.py", "conftest.py"]
+# collect_ignore is a conftest.py variable, not a pytest ini option, so this
+# key never had any effect. pytest 9 rejects it outright under --strict-config
+# ("ERROR: Unknown config option: collect_ignore"), which aborted the whole run.
 asyncio_mode = "auto"
 log_cli = true
 log_cli_level = "INFO"
