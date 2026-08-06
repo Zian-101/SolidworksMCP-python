@@ -12,7 +12,6 @@ platform.system() to "Linux", which short-circuits before reaching any of them),
 
 from __future__ import annotations
 
-import winreg
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -173,6 +172,10 @@ def test_discover_com_via_typeinfo_top_level_exception_returns_empty():
 def test_registry_scan_outer_open_failure(monkeypatch):
     """winreg.OpenKey for HKEY_CLASSES_ROOT\\TypeLib itself raising hits the
     outer 'Registry TypeLib scan failed' debug-log branch."""
+    # winreg is Windows-only; importing it at module scope would turn this
+    # file into a collection error on the Linux CI runner.
+    winreg = pytest.importorskip("winreg")
+
     import solidworks_mcp.tools.docs_discovery as docs_mod
 
     monkeypatch.setattr(docs_mod.platform, "system", lambda: "Windows")
@@ -193,6 +196,10 @@ def test_registry_scan_guid_and_version_level_errors(monkeypatch):
     - GUID_B: opens fine, has one version, but reading its value raises a
       non-OSError -> inner 'except: continue'
     """
+    # See the note in test_registry_scan_outer_open_failure: winreg is
+    # Windows-only and must not be imported at module scope.
+    winreg = pytest.importorskip("winreg")
+
     import solidworks_mcp.tools.docs_discovery as docs_mod
 
     monkeypatch.setattr(docs_mod.platform, "system", lambda: "Windows")

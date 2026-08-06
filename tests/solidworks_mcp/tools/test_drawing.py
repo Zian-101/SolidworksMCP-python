@@ -518,7 +518,17 @@ class TestDrawingToolsBranchCoverage:
             ),
             None,
         )
-        result = await tool_func(input_data=input_data)
+        try:
+            result = await tool_func(input_data=input_data)
+        finally:
+            # Restore the class attribute. Without this the deletion leaks for
+            # the rest of the process and every later test sees the base
+            # class's "not implemented" default instead of the real method.
+            # Serial ordering hid it; under xdist this landed in the same
+            # worker as test_connection_pool_pass_through.py and broke it.
+            if original_add_view is not None:
+                adapter_cls.add_drawing_view = original_add_view
+
         assert result["status"] == "error"
         assert "add_drawing_view" in result["message"]
 

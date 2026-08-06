@@ -1075,8 +1075,21 @@ def test_fetch_docs_context_success(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_go_orchestration_exception_path(tmp_path: Path) -> None:
+async def test_run_go_orchestration_exception_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Run_go_orchestration remains resilient when provider calls fail."""
+    # Supply a credential explicitly. Without one, llm_service raises
+    # "Set GH_TOKEN or GITHUB_API_KEY ..." and latest_error_text is non-empty.
+    # This used to pass only by accident: tests/solidworks_mcp/agents/
+    # test_smoke_test_cli.py runs earlier in a serial run and leaks
+    # GITHUB_API_KEY process-wide, because llm_service.py:337 and
+    # smoke_test.py:118 both use os.environ.setdefault, which monkeypatch
+    # cannot undo. Under xdist the two files land on different workers, the
+    # leak never arrives, and this test failed.
+    monkeypatch.setenv("GITHUB_API_KEY", "gho_test_token")
+    monkeypatch.setenv("GH_TOKEN", "gho_test_token")
+
     db_path = tmp_path / "test.db"
     ensure_dashboard_session(DEFAULT_SESSION_ID, db_path=db_path)
 
