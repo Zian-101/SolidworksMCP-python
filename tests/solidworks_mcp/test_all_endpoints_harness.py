@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import platform
@@ -615,8 +616,8 @@ class TestLevelBSmokeExecution:
                 )
                 if not isinstance(result, dict):
                     non_dict.append(f"{name}: returned {type(result).__name__}")
-            except Exception:
-                pass  # Exceptions are caught in test_smoke_all_tools
+            except Exception as exc:
+                non_dict.append(f"{name}: raised {type(exc).__name__}: {exc}")
 
         assert not non_dict, (
             f"{len(non_dict)} tools did not return a dict:\n" + "\n".join(non_dict)
@@ -639,8 +640,8 @@ class TestLevelBSmokeExecution:
                 )
                 if isinstance(result, dict) and "status" not in result:
                     missing_status.append(name)
-            except Exception:
-                pass
+            except Exception as exc:
+                missing_status.append(f"{name}: raised {type(exc).__name__}: {exc}")
 
         assert not missing_status, (
             f"{len(missing_status)} tools returned dicts without 'status':\n"
