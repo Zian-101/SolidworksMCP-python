@@ -122,3 +122,57 @@ async def test_base_default_sketch_helpers_return_error() -> None:
 
     result = await adapter.sketch_offset(["e1"], 1.0, False)
     assert result.status == AdapterResultStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_base_default_capability_stubs_return_named_errors() -> None:
+    """Every unimplemented capability on the base adapter must return an ERROR
+    AdapterResult that names the capability — never a success-shaped payload.
+
+    This walks the full set of default (non-abstract) methods on
+    ``SolidWorksAdapter`` that a bare subclass inherits unmodified, mirroring
+    the "no fabricated payloads" rule enforced for the tools layer.
+    """
+    adapter = _Adapter({})
+
+    calls: list[tuple[str, object]] = [
+        ("add_polyline", adapter.add_polyline([{"x": 0, "y": 0}, {"x": 1, "y": 1}])),
+        ("delete_feature", adapter.delete_feature("Boss-Extrude1")),
+        ("suppress_feature", adapter.suppress_feature("Boss-Extrude1")),
+        ("undo", adapter.undo()),
+        ("create_reference_plane", adapter.create_reference_plane("Front Plane", offset=5.0)),
+        ("mirror_feature", adapter.mirror_feature(["Boss-Extrude1"], "Front Plane")),
+        ("create_shell", adapter.create_shell(2.0)),
+        ("pattern_linear", adapter.pattern_linear(["Boss-Extrude1"])),
+        ("create_axis", adapter.create_axis("z")),
+        ("pattern_circular", adapter.pattern_circular(["Boss-Extrude1"])),
+        ("add_draft", adapter.add_draft(5.0, draft_faces=[1])),
+        ("move_body", adapter.move_body(dx=10.0)),
+        ("delete_body", adapter.delete_body([0])),
+        ("delete_face", adapter.delete_face([0])),
+        ("scale_model", adapter.scale_model(2.0)),
+        ("set_material", adapter.set_material("1060 Alloy")),
+        ("insert_component", adapter.insert_component("C:/tmp/part.sldprt")),
+        ("set_appearance", adapter.set_appearance(1.0, 0.0, 0.0)),
+        ("add_mate", adapter.add_mate("CompA", "CompB")),
+        ("list_components", adapter.list_components()),
+        ("create_standard_views", adapter.create_standard_views("C:/tmp/part.sldprt")),
+        ("add_drawing_note", adapter.add_drawing_note("note text")),
+        ("insert_model_dimensions", adapter.insert_model_dimensions()),
+        ("list_drawing_views", adapter.list_drawing_views()),
+        ("get_bounding_box", adapter.get_bounding_box()),
+        ("get_material_properties", adapter.get_material_properties()),
+    ]
+
+    for capability_name, coro in calls:
+        result = await coro
+        assert result.status == AdapterResultStatus.ERROR, (
+            f"{capability_name} should return ERROR, got {result.status}"
+        )
+        assert result.data is None, (
+            f"{capability_name} must not return a success-shaped payload"
+        )
+        assert result.error is not None and capability_name in result.error, (
+            f"{capability_name} error message should name the capability: {result.error!r}"
+        )
+        assert "not implemented" in result.error
