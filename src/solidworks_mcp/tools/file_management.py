@@ -4,7 +4,7 @@ Provides tools for managing SolidWorks files including save, save as, file prope
 and reference management.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -498,10 +498,10 @@ async def register_file_management_tools(
                     properties["file_size_bytes"] = stat.st_size
                     properties["file_size"] = f"{stat.st_size / (1024 * 1024):.2f} MB"
                     properties["modified_date"] = datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
+                        stat.st_mtime, tz=UTC
                     ).isoformat()
                     properties["created_date"] = datetime.fromtimestamp(
-                        stat.st_ctime, tz=timezone.utc
+                        stat.st_ctime, tz=UTC
                     ).isoformat()
                 else:
                     properties["note"] = "Document path is not on disk (unsaved?)"

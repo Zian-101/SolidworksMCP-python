@@ -6,8 +6,7 @@ comparison, and library management.
 
 import json
 import os
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -399,7 +398,7 @@ async def register_template_management_tools(
 
             input_data = normalize_input(input_data, TemplateComparisonInput)
             import hashlib
-            from datetime import datetime, timezone
+            from datetime import datetime
             from pathlib import Path
 
             first = str(getattr(input_data, "template1_path", "") or "").strip()
@@ -425,7 +424,7 @@ async def register_template_management_tools(
                     "path": str(path),
                     "size_bytes": stat.st_size,
                     "modified": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
+                        stat.st_mtime, tz=UTC
                     ).isoformat(),
                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 }
@@ -512,7 +511,7 @@ async def register_template_management_tools(
                 "version": str(input_data.get("version", "1.0")),
                 "author": str(input_data.get("author", "")),
                 "description": str(input_data.get("description", "")),
-                "created": datetime.now(timezone.utc).isoformat(),
+                "created": datetime.now(UTC).isoformat(),
                 "file_path": str(Path(template_path).resolve()),
                 "size_bytes": Path(template_path).stat().st_size,
                 "tags": list(input_data.get("tags", []) or []),

@@ -6,59 +6,119 @@ This module preserves historical import paths used by tests and external callers
 
 from __future__ import annotations
 
+import os  # noqa: F401 -- re-exported; tests read `service.os`
+import subprocess  # noqa: F401 -- re-exported; tests patch `service.subprocess`
 from contextlib import contextmanager
 from io import BytesIO
-import os
-import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from ..adapters import create_adapter
-from ..agents.history_db import (
+
+# get_design_session/insert_model_state_snapshot/upsert_design_session are
+# re-exported for tests that call `service.get_design_session(...)` etc.
+# directly rather than through history_db.
+from ..agents.history_db import (  # noqa: F401
     get_design_session,
     insert_model_state_snapshot,
     list_plan_checkpoints,
     upsert_design_session,
 )
 from ..agents.retrieval_index import _chunk_text
-from ..config import load_config
 from ..agents.schemas import RecoverableFailure as _AgentRecoverableFailure
+from ..config import load_config
 from .services import *  # noqa: F401,F403
+
+# The two names below are exported via the star import above (they're in
+# services.__all__), but ruff's F405 checker cannot see through `import *`,
+# so they are re-imported explicitly here to keep every usage resolvable.
+from .services import DEFAULT_API_ORIGIN, DEFAULT_PREVIEW_ORIENTATION
+from .services import _utils as _utils_service
 from .services import checkpoint_service as _checkpoint_service
 from .services import docs_service as _docs_service
 from .services import llm_service as _llm_service
 from .services import model_service as _model_service
 from .services import preview_service as _preview_service
 from .services import session_service as _session_service
-from .services import _utils as _utils_service
-from .services._utils import (
+
+# Everything imported below with an unused-looking alias/name is part of this
+# module's documented job: re-exporting legacy import paths for tests and
+# external callers that do `from solidworks_mcp.ui.service import <name>` or
+# `service.<name>`. Do not remove these for being locally unused --
+# `tests/solidworks_mcp/ui/test_service_branches.py`,
+# `tests/solidworks_mcp/ui/test_service_coverage_push.py`,
+# `tests/solidworks_mcp/ui/test_service_helpers.py`, and
+# `tests/solidworks_mcp/ui/test_service_new_helpers.py` import them directly.
+from .services._utils import (  # noqa: F401
     _looks_like_path_token,
     _trace_json_default,
-    filter_docs_text as _filter_docs_text,
-    feature_grounding_warning_text as _feature_grounding_warning_text,
-    feature_target_status as _feature_target_status,
-    materialize_uploaded_model as _materialize_uploaded_model_impl,
-    merge_metadata as _merge_metadata,
-    normalize_feature_targets as _normalize_feature_targets,
-    normalize_model_name_for_provider as _normalize_model_name_for_provider,
-    parse_json_blob as _parse_json_blob,
-    context_file_path as _context_file_path_impl,
-    safe_context_name as _safe_context_name,
-    provider_from_model_name as _provider_from_model_name,
-    provider_has_credentials as _provider_has_credentials,
-    read_reference_source as _read_reference_source,
-    read_reference_url as _read_reference_url,
-    sanitize_model_path_text as _sanitize_model_path_text,
-    sanitize_preview_viewer_url as _sanitize_preview_viewer_url,
-    sanitize_ui_text as _sanitize_ui_text,
-    trace_json as _trace_json,
-    trace_session_row as _trace_session_row,
-    trace_tool_records as _trace_tool_records,
-    workflow_copy as _workflow_copy,
 )
-from .services.llm_service import (
+from .services._utils import (
+    context_file_path as _context_file_path_impl,
+)
+from .services._utils import (
+    feature_grounding_warning_text as _feature_grounding_warning_text,  # noqa: F401
+)
+from .services._utils import (
+    feature_target_status as _feature_target_status,  # noqa: F401
+)
+from .services._utils import (
+    filter_docs_text as _filter_docs_text,  # noqa: F401
+)
+from .services._utils import (
+    materialize_uploaded_model as _materialize_uploaded_model_impl,
+)
+from .services._utils import (
+    merge_metadata as _merge_metadata,
+)
+from .services._utils import (
+    normalize_feature_targets as _normalize_feature_targets,
+)
+from .services._utils import (
+    normalize_model_name_for_provider as _normalize_model_name_for_provider,  # noqa: F401
+)
+from .services._utils import (
+    parse_json_blob as _parse_json_blob,  # noqa: F401
+)
+from .services._utils import (
+    provider_from_model_name as _provider_from_model_name,  # noqa: F401
+)
+from .services._utils import (
+    provider_has_credentials as _provider_has_credentials,  # noqa: F401
+)
+from .services._utils import (
+    read_reference_source as _read_reference_source,
+)
+from .services._utils import (
+    read_reference_url as _read_reference_url,
+)
+from .services._utils import (
+    safe_context_name as _safe_context_name,
+)
+from .services._utils import (
+    sanitize_model_path_text as _sanitize_model_path_text,
+)
+from .services._utils import (
+    sanitize_preview_viewer_url as _sanitize_preview_viewer_url,
+)
+from .services._utils import (
+    sanitize_ui_text as _sanitize_ui_text,  # noqa: F401
+)
+from .services._utils import (
+    trace_json as _trace_json,  # noqa: F401
+)
+from .services._utils import (
+    trace_session_row as _trace_session_row,  # noqa: F401
+)
+from .services._utils import (
+    trace_tool_records as _trace_tool_records,  # noqa: F401
+)
+from .services._utils import (
+    workflow_copy as _workflow_copy,  # noqa: F401
+)
+from .services.llm_service import (  # noqa: F401
     Agent,
     CheckpointCandidate,
     ClarificationResponse,
@@ -68,6 +128,10 @@ from .services.llm_service import (
     _build_agent_model,
     _ensure_provider_credentials,
     _run_structured_agent,
+)
+from .services.session_service import (
+    build_dashboard_state,
+    ensure_dashboard_session,
 )
 
 _ORIG_BUILD_AGENT_MODEL = _llm_service._build_agent_model
@@ -124,11 +188,16 @@ def _temporary_module_bindings(module: Any, **bindings: Any):
                 setattr(module, name, original[name])
 
 
-def _read_reference_source(source_path: Path) -> str:
+# Deliberately shadows the `_read_reference_source` name imported above:
+# the import is captured before this local wrapper replaces it, matching
+# the `_ORIG_*` capture-then-shadow pattern used elsewhere in this module.
+def _read_reference_source(source_path: Path) -> str:  # noqa: F811
     return _utils_service.read_reference_source(source_path)
 
 
-def _read_reference_url(source_url: str) -> tuple[str, str]:
+# Deliberately shadows the `_read_reference_url` name imported above, same
+# capture-then-shadow wrapper pattern as `_read_reference_source`.
+def _read_reference_url(source_url: str) -> tuple[str, str]:  # noqa: F811
     request = Request(source_url, headers={"User-Agent": "SolidWorksMCP/1.0"})
     with urlopen(request, timeout=20) as response:
         content_type = response.headers.get_content_type()
@@ -157,7 +226,10 @@ def _read_reference_url(source_url: str) -> tuple[str, str]:
     return decoded.strip(), label
 
 
-def _build_agent_model(model_name: str, local_endpoint: str | None = None):
+# Deliberately shadows the `_build_agent_model` name imported above from
+# llm_service: `_ORIG_BUILD_AGENT_MODEL` captures the original before this
+# local wrapper replaces it, matching the capture-then-shadow pattern.
+def _build_agent_model(model_name: str, local_endpoint: str | None = None):  # noqa: F811
     with _temporary_module_bindings(
         _llm_service,
         OpenAIProvider=OpenAIProvider,
@@ -166,7 +238,9 @@ def _build_agent_model(model_name: str, local_endpoint: str | None = None):
         return _ORIG_BUILD_AGENT_MODEL(model_name, local_endpoint)
 
 
-async def _run_structured_agent(*args: Any, **kwargs: Any):
+# Deliberately shadows the `_run_structured_agent` name imported above from
+# llm_service, same capture-then-shadow wrapper pattern as `_build_agent_model`.
+async def _run_structured_agent(*args: Any, **kwargs: Any):  # noqa: F811
     with _temporary_module_bindings(
         _llm_service,
         Agent=Agent,

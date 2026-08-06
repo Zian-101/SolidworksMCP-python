@@ -1443,7 +1443,9 @@ def _move_body_impl(
         if box_before:
             expected = tuple(
                 round(v + o, 3)
-                for v, o in zip(box_before, (dx, dy, dz, dx, dy, dz))
+                for v, o in zip(
+                    box_before, (dx, dy, dz, dx, dy, dz), strict=True
+                )
             )
             for candidate in _solid_bodies(adapter):
                 box = _body_box(adapter, candidate)
@@ -1510,7 +1512,9 @@ def _boxes_match(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
     Returns:
         bool: True when every corner matches.
     """
-    return len(a) == len(b) and all(abs(x - y) < 1e-3 for x, y in zip(a, b))
+    return len(a) == len(b) and all(
+        abs(x - y) < 1e-3 for x, y in zip(a, b, strict=True)
+    )
 
 
 def _scale_model_impl(

@@ -19,6 +19,8 @@ from pydantic import Field
 
 from .input_compat import (
     CompatInput,
+)
+from .input_compat import (
     normalize_input as _normalize_input,
 )
 

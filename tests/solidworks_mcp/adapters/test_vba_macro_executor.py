@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from solidworks_mcp.adapters.base import AdapterResultStatus
-from solidworks_mcp.adapters.vba_macro_executor import MacroExecutionRequest, VbaMacroExecutor
+from solidworks_mcp.adapters.vba_macro_executor import (
+    MacroExecutionRequest,
+    VbaMacroExecutor,
+)
 
 
 @pytest.mark.asyncio

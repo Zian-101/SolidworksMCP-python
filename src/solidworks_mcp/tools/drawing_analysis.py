@@ -4,6 +4,7 @@ Provides advanced analysis capabilities for drawing documents including dimensio
 analysis, view analysis, annotation checking, and compliance verification.
 """
 
+from datetime import UTC
 from typing import Any
 
 from fastmcp import FastMCP
@@ -168,7 +169,7 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Failed to analyze drawing",
                 }
 
-            from datetime import datetime, timezone
+            from datetime import datetime
             from pathlib import Path
 
             drawing_path = str(getattr(input_data, "drawing_path", "") or "").strip()
@@ -185,7 +186,7 @@ async def register_drawing_analysis_tools(
                     "file_path": str(path),
                     "size_bytes": stat.st_size,
                     "modified": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
+                        stat.st_mtime, tz=UTC
                     ).isoformat(),
                 }
 
@@ -493,7 +494,7 @@ async def register_drawing_analysis_tools(
         """
         try:
             import hashlib
-            from datetime import datetime, timezone
+            from datetime import datetime
             from pathlib import Path
 
             first = str(input_data.get("drawing_version_1", "")).strip()
@@ -523,7 +524,7 @@ async def register_drawing_analysis_tools(
                     "path": str(path),
                     "size_bytes": stat.st_size,
                     "modified": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
+                        stat.st_mtime, tz=UTC
                     ).isoformat(),
                     "sha256": digest,
                 }

@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from solidworks_mcp.agents.soc_exporter import (
-    _CodeGen,
     _checkpoint_comment,
+    _CodeGen,
     _entity_id_from_output,
     _fmt_num,
     _parse_input,
     _parse_output,
     generate_script,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper factories
@@ -421,8 +418,8 @@ def test_generate_script_checkpoint_inserted_after_correct_record():
     ]
     script = generate_script(records, checkpoints=checkpoints)
     lines = script.splitlines()
-    cp_idx = next(i for i, l in enumerate(lines) if "# -- checkpoint" in l)
-    sketch_idx = next(i for i, l in enumerate(lines) if "create_sketch" in l)
+    cp_idx = next(i for i, line in enumerate(lines) if "# -- checkpoint" in line)
+    sketch_idx = next(i for i, line in enumerate(lines) if "create_sketch" in line)
     assert cp_idx < sketch_idx, "checkpoint comment should appear before the next sketch call"
 
 
@@ -536,6 +533,7 @@ def test_codegen_process_skips_soc_and_ui_tools() -> None:
 def test_soc_exporter_cli_usage(monkeypatch) -> None:
     """CLI with <3 args should print usage and exit. Covers lines 611-615."""
     import sys
+
     from solidworks_mcp.agents import soc_exporter
 
     monkeypatch.setattr(sys, "argv", ["prog", "only_one_arg"])

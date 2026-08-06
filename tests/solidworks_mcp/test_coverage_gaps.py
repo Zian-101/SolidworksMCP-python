@@ -6,10 +6,7 @@ Lines marked UNREACHABLE are explained in the module docstring at the bottom.
 
 from __future__ import annotations
 
-import json
 import sys
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,7 +18,6 @@ from solidworks_mcp.adapters.circuit_breaker import (
     CircuitState,
 )
 from solidworks_mcp.adapters.mock_adapter import MockSolidWorksAdapter
-
 
 # ---------------------------------------------------------------------------
 # circuit_breaker.py: line 205 — _execute_with_circuit_breaker returns when OPEN
@@ -302,6 +298,7 @@ async def test_soc_create_checkpoint_swallows_exceptions(monkeypatch):
 def test_com_executor_start_returns_early_when_thread_alive(monkeypatch):
     """start() should return early when the worker thread is already running. Covers line 104."""
     import threading
+
     from solidworks_mcp.adapters import com_executor
 
     executor = com_executor.ComExecutor("test")
@@ -330,6 +327,7 @@ def test_com_executor_start_raises_when_pywin32_unavailable(monkeypatch):
 def test_com_executor_start_raises_on_ready_timeout(monkeypatch):
     """start() should raise RuntimeError when worker doesn't signal ready. Covers line 117."""
     import threading
+
     from solidworks_mcp.adapters import com_executor
 
     monkeypatch.setattr(com_executor, "PYWIN32_AVAILABLE", True)
@@ -355,6 +353,7 @@ def test_com_executor_start_raises_on_ready_timeout(monkeypatch):
 def test_com_executor_stop_warns_when_thread_doesnt_exit(monkeypatch):
     """stop() should warn when thread doesn't exit within timeout. Covers line 138."""
     import threading
+
     from solidworks_mcp.adapters import com_executor
 
     executor = com_executor.ComExecutor("test")
@@ -480,10 +479,6 @@ def test_docs_service_ingest_saves_index(monkeypatch, tmp_path):
     from solidworks_mcp.agents import vector_rag
     monkeypatch.setattr(vector_rag, "VectorRAGIndex", _FakeIndex)
 
-    from solidworks_mcp.ui.services.session_service import (
-        ensure_dashboard_session,
-        build_dashboard_state,
-    )
     monkeypatch.setattr(docs_service, "ensure_dashboard_session" if hasattr(docs_service, "ensure_dashboard_session") else "__missing__", lambda *_a, **_kw: None, raising=False)
 
     # Create a real markdown file to ingest
@@ -585,8 +580,9 @@ def test_startup_ingest_returns_early_when_no_md_files(monkeypatch, tmp_path):
 
 def test_detect_gpu_vram_wmic_path(monkeypatch):
     """_detect_gpu_vram_gb should use wmic on Windows when nvidia-smi fails. Covers lines 348-349."""
-    from solidworks_mcp.ui import local_llm
     import subprocess
+
+    from solidworks_mcp.ui import local_llm
 
     # Simulate Windows and nvidia-smi failure, then wmic success
     monkeypatch.setattr(local_llm.platform, "system", lambda: "Windows")
@@ -608,7 +604,6 @@ def test_detect_gpu_vram_wmic_path(monkeypatch):
 def test_detect_system_ram_gb_psutil_path(monkeypatch):
     """_detect_system_ram_gb should return RAM via psutil when available. Covers lines 363."""
     from solidworks_mcp.ui import local_llm
-    import sys
 
     # Inject a fake psutil module
     fake_psutil = MagicMock()
@@ -622,7 +617,6 @@ def test_detect_system_ram_gb_psutil_path(monkeypatch):
 def test_detect_system_ram_gb_wmic_path(monkeypatch):
     """_detect_system_ram_gb should fall back to wmic on Windows. Covers lines 379-380."""
     from solidworks_mcp.ui import local_llm
-    import sys
 
     # Remove psutil so the ImportError path runs
     monkeypatch.setitem(sys.modules, "psutil", None)
@@ -716,7 +710,10 @@ def test_update_plan_checkpoint_planned_action(tmp_path):
 
 def test_update_plan_checkpoint_planned_action_missing(tmp_path):
     """update_plan_checkpoint_planned_action should return None when row missing. Covers line 872."""
-    from solidworks_mcp.agents.history_db import init_db, update_plan_checkpoint_planned_action
+    from solidworks_mcp.agents.history_db import (
+        init_db,
+        update_plan_checkpoint_planned_action,
+    )
 
     db_path = tmp_path / "test.db"
     init_db(db_path=db_path)
@@ -733,9 +730,9 @@ def test_update_plan_checkpoint_planned_action_missing(tmp_path):
 def test_create_soc_checkpoint_inserts_and_returns_id(tmp_path):
     """create_soc_checkpoint should persist a checkpoint and return its id. Covers 1290-1305."""
     from solidworks_mcp.agents.history_db import (
-        init_db,
         create_soc_checkpoint,
         get_soc_checkpoint,
+        init_db,
     )
 
     db_path = tmp_path / "test.db"
@@ -762,7 +759,7 @@ def test_create_soc_checkpoint_inserts_and_returns_id(tmp_path):
 
 def test_get_soc_checkpoint_returns_none_for_missing(tmp_path):
     """get_soc_checkpoint should return None when label doesn't exist. Covers lines 1359-1370."""
-    from solidworks_mcp.agents.history_db import init_db, get_soc_checkpoint
+    from solidworks_mcp.agents.history_db import get_soc_checkpoint, init_db
 
     db_path = tmp_path / "test.db"
     init_db(db_path=db_path)
@@ -820,7 +817,10 @@ async def test_vector_rag_index_await():
 
 def test_build_solidworks_api_docs_index_returns_empty_when_no_path():
     """build_solidworks_api_docs_index should return early when docs_json_path is None. Covers line 565."""
-    from solidworks_mcp.agents.vector_rag import build_solidworks_api_docs_index, VectorRAGIndex
+    from solidworks_mcp.agents.vector_rag import (
+        VectorRAGIndex,
+        build_solidworks_api_docs_index,
+    )
 
     result = build_solidworks_api_docs_index(docs_json_path=None)
     assert isinstance(result, VectorRAGIndex)

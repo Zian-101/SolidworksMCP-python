@@ -19,6 +19,8 @@ from ..adapters.base import (
 )
 from .input_compat import (
     CompatInput,
+)
+from .input_compat import (
     normalize_input as _normalize_input,
 )
 

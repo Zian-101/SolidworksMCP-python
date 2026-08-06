@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from solidworks_mcp.adapters.base import AdapterResult, AdapterResultStatus, SweepParameters
+from solidworks_mcp.adapters.base import (
+    AdapterResult,
+    AdapterResultStatus,
+    SweepParameters,
+)
 from solidworks_mcp.adapters.vba_adapter import VbaGeneratorAdapter
 from solidworks_mcp.adapters.vba_macro_executor import MacroExecutionRequest
 

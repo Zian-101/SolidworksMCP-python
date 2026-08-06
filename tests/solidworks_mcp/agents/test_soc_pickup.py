@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,7 +14,6 @@ from solidworks_mcp.agents.soc_pickup import (
     emit_feature_lines,
     generate_pickup_lines,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -311,7 +309,7 @@ async def test_pickup_changes_no_new_features(tmp_db):
 
     adapter = _make_adapter(features)
     lines = await pickup_changes(adapter, "sess-no-delta", db_path=tmp_db)
-    assert any("no new features" in l for l in lines)
+    assert any("no new features" in line for line in lines)
 
 
 @pytest.mark.asyncio
@@ -435,9 +433,8 @@ def test_feature_map_returns_name_keyed_dict() -> None:
 
 def test_pickup_changes_handles_bad_snapshot_json(tmp_path, monkeypatch) -> None:
     """pickup_changes should handle invalid snapshot JSON gracefully. Covers lines 260-261."""
-    import pytest
-    from solidworks_mcp.agents import soc_pickup
     from solidworks_mcp.adapters.base import AdapterResult, AdapterResultStatus
+    from solidworks_mcp.agents import soc_pickup
 
     mock_adapter = AsyncMock()
     mock_adapter.list_features = AsyncMock(
@@ -484,8 +481,8 @@ def test_pickup_changes_inserts_before_finally_block(tmp_path) -> None:
 
 def test_pickup_changes_appends_when_no_finally(tmp_path, monkeypatch) -> None:
     """pickup_changes should append to script when no finally block. Covers line 278."""
-    from solidworks_mcp.agents import soc_pickup
     from solidworks_mcp.adapters.base import AdapterResult, AdapterResultStatus
+    from solidworks_mcp.agents import soc_pickup
 
     mock_adapter = AsyncMock()
     mock_adapter.list_features = AsyncMock(
@@ -509,7 +506,7 @@ def test_pickup_changes_appends_when_no_finally(tmp_path, monkeypatch) -> None:
     script_file.write_text("# script content\nsome_code()\n", encoding="utf-8")
 
     import asyncio
-    result = asyncio.run(
+    asyncio.run(
         soc_pickup.pickup_changes(mock_adapter, session_id="s1", output_path=str(script_file))
     )
     # File was written with appended lines (no "    finally:" present)
@@ -520,6 +517,7 @@ def test_pickup_changes_appends_when_no_finally(tmp_path, monkeypatch) -> None:
 def test_soc_pickup_cli_exits(monkeypatch) -> None:
     """_cli should print usage and exit(1). Covers lines 310-320."""
     import sys
+
     from solidworks_mcp.agents import soc_pickup
 
     monkeypatch.setattr(sys, "argv", ["prog"])

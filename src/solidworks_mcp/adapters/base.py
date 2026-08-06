@@ -586,7 +586,7 @@ class SolidWorksAdapter(ABC):
 
     async def add_polyline(
         self, points: list[dict[str, float]], closed: bool = False
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Add a connected chain of line segments in one call.
 
         Draws a segment between each consecutive pair of ``points`` (and a
@@ -929,8 +929,8 @@ class SolidWorksAdapter(ABC):
         )
 
     async def create_cut_extrude(
-        self, params: "ExtrusionParameters"
-    ) -> "AdapterResult[Any]":
+        self, params: ExtrusionParameters
+    ) -> AdapterResult[Any]:
         """Create a cut-extrude feature from the active sketch.
 
         Cuts material from the current solid body using the active sketch profile.
@@ -949,7 +949,7 @@ class SolidWorksAdapter(ABC):
 
     async def add_fillet(
         self, radius: float, edge_names: list[str]
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Add a fillet feature to selected edges.
 
         Rounds the selected edges of the current solid body with the given radius.
@@ -966,7 +966,7 @@ class SolidWorksAdapter(ABC):
             error="add_fillet is not implemented by this adapter",
         )
 
-    async def delete_feature(self, name: str) -> "AdapterResult[Any]":
+    async def delete_feature(self, name: str) -> AdapterResult[Any]:
         """Delete a named feature (or sketch) from the active model.
 
         Equivalent to selecting the feature and pressing Delete in SolidWorks.
@@ -985,7 +985,7 @@ class SolidWorksAdapter(ABC):
 
     async def suppress_feature(
         self, name: str, suppress: bool = True
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Suppress or unsuppress a named feature (reversible, non-destructive).
 
         Args:
@@ -1000,7 +1000,7 @@ class SolidWorksAdapter(ABC):
             error="suppress_feature is not implemented by this adapter",
         )
 
-    async def undo(self, count: int = 1) -> "AdapterResult[Any]":
+    async def undo(self, count: int = 1) -> AdapterResult[Any]:
         """Undo the last ``count`` operations in the active model.
 
         Args:
@@ -1020,7 +1020,7 @@ class SolidWorksAdapter(ABC):
         offset: float = 0.0,
         angle: float = 0.0,
         flip: bool = False,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Create a reference plane offset from (or angled to) an existing plane.
 
         Args:
@@ -1042,7 +1042,7 @@ class SolidWorksAdapter(ABC):
         features: list[str],
         mirror_plane: str,
         merge: bool = True,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Mirror one or more solid features about a plane.
 
         Args:
@@ -1063,7 +1063,7 @@ class SolidWorksAdapter(ABC):
         thickness: float,
         remove_faces: list[int] | None = None,
         outward: bool = False,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Hollow out the solid, optionally opening one or more faces.
 
         Args:
@@ -1086,7 +1086,7 @@ class SolidWorksAdapter(ABC):
         count: int = 2,
         spacing: float = 10.0,
         direction_edge: int | None = None,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Repeat features along a model axis.
 
         Args:
@@ -1104,7 +1104,7 @@ class SolidWorksAdapter(ABC):
             error="pattern_linear is not implemented by this adapter",
         )
 
-    async def create_axis(self, reference: str = "z") -> "AdapterResult[Any]":
+    async def create_axis(self, reference: str = "z") -> AdapterResult[Any]:
         """Create a reference axis along a principal model direction.
 
         Args:
@@ -1125,7 +1125,7 @@ class SolidWorksAdapter(ABC):
         count: int = 4,
         angle: float = 360.0,
         equal_spacing: bool = True,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Repeat features around an axis.
 
         Args:
@@ -1149,7 +1149,7 @@ class SolidWorksAdapter(ABC):
         neutral_face: int = 0,
         draft_faces: list[int] | None = None,
         outward: bool = False,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Taper faces by a draft angle.
 
         Args:
@@ -1174,7 +1174,7 @@ class SolidWorksAdapter(ABC):
         dz: float = 0.0,
         copy: bool = False,
         copies: int = 1,
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Translate or copy a solid body.
 
         Args:
@@ -1195,7 +1195,7 @@ class SolidWorksAdapter(ABC):
 
     async def delete_body(
         self, bodies: list[int] | None = None
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Delete solid bodies from a multibody part.
 
         Args:
@@ -1211,7 +1211,7 @@ class SolidWorksAdapter(ABC):
 
     async def delete_face(
         self, faces: list[int] | None = None
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Remove faces from a solid, healing the opening.
 
         Args:
@@ -1227,7 +1227,7 @@ class SolidWorksAdapter(ABC):
 
     async def scale_model(
         self, factor: float = 1.0, factor_y: float = 0.0, factor_z: float = 0.0
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Scale the model about its centroid.
 
         Args:
@@ -1245,7 +1245,7 @@ class SolidWorksAdapter(ABC):
 
     async def set_material(
         self, name: str, database: str | None = None
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Assign a material to the active part.
 
         Args:
@@ -1262,7 +1262,7 @@ class SolidWorksAdapter(ABC):
 
     async def insert_component(
         self, file_path: str, x: float = 0.0, y: float = 0.0, z: float = 0.0
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Insert a part or sub-assembly into the active assembly.
 
         Args:
@@ -1281,7 +1281,7 @@ class SolidWorksAdapter(ABC):
 
     async def set_appearance(
         self, red: float, green: float, blue: float, transparency: float = 0.0
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Set the model's display colour and transparency.
 
         Args:
@@ -1300,7 +1300,7 @@ class SolidWorksAdapter(ABC):
 
     async def add_mate(
         self, component_a: str, component_b: str, entity_a: str = "Front Plane", entity_b: str = "Front Plane", mate_type: str = "coincident", alignment: str = "aligned", distance: float = 0.0, angle: float = 0.0
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Mate two components in the active assembly.
 
         Args:
@@ -1321,7 +1321,7 @@ class SolidWorksAdapter(ABC):
             error="add_mate is not implemented by this adapter",
         )
 
-    async def list_components(self) -> "AdapterResult[Any]":
+    async def list_components(self) -> AdapterResult[Any]:
         """List the top-level components of the active assembly.
 
         Returns:
@@ -1332,7 +1332,7 @@ class SolidWorksAdapter(ABC):
             error="list_components is not implemented by this adapter",
         )
 
-    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> "AdapterResult[Any]":
+    async def add_drawing_view(self, model_path: str, orientation: str = "front", x: float = 100.0, y: float = 150.0, scale: float = 0.0) -> AdapterResult[Any]:
         """Place a view of a model on the active drawing sheet.
 
         Returns:
@@ -1343,7 +1343,7 @@ class SolidWorksAdapter(ABC):
             error="add_drawing_view is not implemented by this adapter",
         )
 
-    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> "AdapterResult[Any]":
+    async def create_standard_views(self, model_path: str, third_angle: bool = True) -> AdapterResult[Any]:
         """Drop the three standard views onto the active drawing sheet.
 
         Returns:
@@ -1354,7 +1354,7 @@ class SolidWorksAdapter(ABC):
             error="create_standard_views is not implemented by this adapter",
         )
 
-    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> "AdapterResult[Any]":
+    async def add_drawing_note(self, text: str, x: float = 100.0, y: float = 50.0, font_size: float = 0.0) -> AdapterResult[Any]:
         """Place a text note on the active drawing sheet.
 
         Returns:
@@ -1365,7 +1365,7 @@ class SolidWorksAdapter(ABC):
             error="add_drawing_note is not implemented by this adapter",
         )
 
-    async def insert_model_dimensions(self, all_views: bool = True) -> "AdapterResult[Any]":
+    async def insert_model_dimensions(self, all_views: bool = True) -> AdapterResult[Any]:
         """Import the model's dimensions onto the drawing views.
 
         Returns:
@@ -1376,7 +1376,7 @@ class SolidWorksAdapter(ABC):
             error="insert_model_dimensions is not implemented by this adapter",
         )
 
-    async def list_drawing_views(self) -> "AdapterResult[Any]":
+    async def list_drawing_views(self) -> AdapterResult[Any]:
         """List the views on the active drawing.
 
         Returns:
@@ -1387,7 +1387,7 @@ class SolidWorksAdapter(ABC):
             error="list_drawing_views is not implemented by this adapter",
         )
 
-    async def get_bounding_box(self) -> "AdapterResult[Any]":
+    async def get_bounding_box(self) -> AdapterResult[Any]:
         """Measure the axis-aligned bounding box of the model's solid bodies.
 
         Returns:
@@ -1400,7 +1400,7 @@ class SolidWorksAdapter(ABC):
 
     async def check_interference(
         self, params: dict[str, Any] | None = None
-    ) -> "AdapterResult[Any]":
+    ) -> AdapterResult[Any]:
         """Detect interfering components in the active assembly.
 
         Args:
@@ -1414,7 +1414,7 @@ class SolidWorksAdapter(ABC):
             error="check_interference is not implemented by this adapter",
         )
 
-    async def get_material_properties(self) -> "AdapterResult[Any]":
+    async def get_material_properties(self) -> AdapterResult[Any]:
         """Read the material assigned to the active model.
 
         Returns:

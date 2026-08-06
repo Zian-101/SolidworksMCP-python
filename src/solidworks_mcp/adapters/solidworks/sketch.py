@@ -507,7 +507,9 @@ def _add_polyline_impl(
         Raises:
             Exception: If any ``CreateLine`` returns ``None``.
         """
-        segments = list(zip(pts, pts[1:]))
+        # pts[1:] is intentionally one element shorter than pts -- this
+        # zips each point with its successor to build consecutive segments.
+        segments = list(zip(pts, pts[1:], strict=False))
         if closed and len(pts) >= 3:
             segments.append((pts[-1], pts[0]))
 

@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from ..adapters.base import SolidWorksAdapter
 from .input_compat import (
     CompatInput,
+)
+from .input_compat import (
     normalize_input as _normalize_input,
 )
 

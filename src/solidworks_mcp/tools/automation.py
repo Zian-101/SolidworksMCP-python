@@ -16,11 +16,10 @@ from pydantic import Field
 from ..adapters.base import SolidWorksAdapter
 from .input_compat import (
     CompatInput,
+)
+from .input_compat import (
     normalize_input as _normalize_input,
 )
-
-
-
 
 # Input schemas using Python 3.14 built-in types
 

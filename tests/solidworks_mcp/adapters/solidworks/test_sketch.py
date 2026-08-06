@@ -12,7 +12,7 @@ from solidworks_mcp.adapters.solidworks import sketch
 class _FakeSwApp:
     """Minimal swApp stand-in; ActiveDoc proxies the adapter's currentModel."""
 
-    def __init__(self, adapter: "_FakeSketchAdapter") -> None:
+    def __init__(self, adapter: _FakeSketchAdapter) -> None:
         self._adapter = adapter
 
     @property
