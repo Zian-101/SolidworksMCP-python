@@ -392,12 +392,26 @@ and pays the full cost every iteration. Use
 ``sw_type_info.flag_members(obj, *names)`` (``sw_type_info.py:207``) to flag
 just the members you are about to touch.
 
-### 6. Raw PyIDispatch in COM arrays
+### 6. Flagging is per-object — mind fresh dispatches
 
 ``GetViews``, ``GetComponents`` and friends return **raw** ``PyIDispatch``
 objects, not wrapped ones. Method flagging is a silent no-op on those — it
 neither errors nor takes effect. Wrap each element with
 ``win32com.client.dynamic.Dispatch`` before flagging or calling it.
+
+The same trap bites through ``swApp.ActiveDoc``, which returns a **fresh,
+unflagged dispatch every time**. Flagging ``adapter.currentModel`` does not
+apply to it, so ``swApp.ActiveDoc.GetActiveSketch2()`` raises "Member not
+found", and if that call sits inside ``adapter._attempt`` the error becomes
+``None`` — indistinguishable from "no sketch is open". That silently broke
+``add_sketch_constraint`` and ``exit_sketch``. Always call through the
+flagged ``adapter.currentModel``, falling back to ``swApp.ActiveDoc``:
+
+```python
+sw_active = adapter._attempt(
+    lambda: adapter.currentModel.GetActiveSketch2()
+) or adapter._attempt(lambda: adapter.swApp.ActiveDoc.GetActiveSketch2())
+```
 
 ### 7. Byref VARIANT out-parameters
 
@@ -443,7 +457,38 @@ Do not re-litigate these; they were retried against valid solid geometry and
 still fail: ``InsertCombineFeature`` (boolean ops), ``InsertMoveFace``,
 ``InsertRib``. Hole wizard and split body are simply unimplemented.
 
-### 11. Regression tests
+### 11. A "live" test is only live if it clears all three mock switches
+
+``tests/conftest.py`` sets ``USE_MOCK_SOLIDWORKS=true`` at import time for the
+whole session, and ``AdapterFactory._determine_adapter_type`` returns ``MOCK``
+whenever ``config.testing or config.mock_solidworks`` is set — **before** it
+looks at ``adapter_type``. A test that boots the server via ``load_config()``
+therefore gets the mock even under ``SOLIDWORKS_MCP_RUN_REAL_INTEGRATION=1``
+and the ``solidworks_only`` marker.
+
+``test_live_workflow_e2e`` ran this way for its whole life, asserting against
+invented volumes (24042.6, 37000.2, 95304.4 mm³ on consecutive runs of the
+same 80×40×10 = 32000 mm³ box). To force the real adapter, clear all three:
+
+```python
+os.environ.pop("USE_MOCK_SOLIDWORKS", None)
+config = load_config()
+config.adapter_type = AdapterType.PYWIN32
+config.testing = False
+config.mock_solidworks = False
+```
+
+Quickest tell that a "live" test is secretly on the mock: runtime. Real
+SolidWorks takes tens of seconds; the mock finishes in about one.
+
+Tests using the ``connected_adapter`` fixture build ``PyWin32Adapter``
+directly and are unaffected.
+
+Do **not** call ``CloseAllDocuments`` to get a clean session. It reaches
+across the whole SolidWorks application, including documents held by other
+tests' adapters, and makes unrelated tests fail on ordering alone.
+
+### 12. Regression tests
 
 See ``tests/test_live_sw_regression.py`` for the safety net:
 
