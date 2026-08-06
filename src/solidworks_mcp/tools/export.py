@@ -844,16 +844,15 @@ async def register_export_tools(
                     "message": result.error or "Failed to export image",
                 }
 
+            # This reported an exported image, with dimensions, for a file that
+            # was never written.
             return {
-                "status": "success",
-                "message": f"Exported image: {input_data.file_path}",
-                "export": {
-                    "file_path": input_data.file_path,
-                    "format": input_data.format_type.upper(),
-                    "dimensions": f"{input_data.width}x{input_data.height}",
-                    "view": input_data.view_orientation,
-                    "use_case": "Documentation and presentations",
-                },
+                "status": "error",
+                "message": (
+                    "Cannot export an image: this adapter implements neither "
+                    "export_image nor export_file, so no image file was "
+                    "written."
+                ),
             }
 
         except Exception as e:

@@ -246,7 +246,7 @@ class TestFileManagementTools:
     async def test_file_management_tools_fallback_without_adapter_methods(
         self, mcp_server, mock_config
     ):
-        """Test fallback success payloads when adapter has no specialized methods."""
+        """An adapter with no file methods must refuse, not echo the request back."""
         adapter_without_methods = object()
         await register_file_management_tools(
             mcp_server, adapter_without_methods, mock_config
@@ -270,8 +270,8 @@ class TestFileManagementTools:
         manage_result = await manage_tool(
             input_data=FileOperationInput(file_path="demo.sldprt", operation="rename")
         )
-        assert manage_result["status"] == "success"
-        assert manage_result["data"]["file_path"] == "demo.sldprt"
+        assert manage_result["status"] == "error"
+        assert "manage_file_properties" in manage_result["message"]
 
         convert_result = await convert_tool(
             input_data=FormatConversionInput(
@@ -280,14 +280,14 @@ class TestFileManagementTools:
                 target_format="STEP",
             )
         )
-        assert convert_result["status"] == "success"
-        assert convert_result["data"]["target_file"] == "demo.step"
+        assert convert_result["status"] == "error"
+        assert "no output file was written" in convert_result["message"]
 
         batch_result = await batch_tool(
             input_data=FileOperationInput(file_path="./parts", operation="batch")
         )
-        assert batch_result["status"] == "success"
-        assert batch_result["data"]["operation"] == "batch"
+        assert batch_result["status"] == "error"
+        assert "no files" in batch_result["message"]
 
     @pytest.mark.asyncio
     async def test_save_file_exception_path(
@@ -340,7 +340,7 @@ class TestFileManagementTools:
     async def test_save_file_fallback_without_adapter_method(
         self, mcp_server, mock_config
     ):
-        """Test save_file fallback path when adapter has no save_file method."""
+        """save_file must not claim a save happened when the adapter cannot save."""
         await register_file_management_tools(mcp_server, object(), mock_config)
 
         save_tool = None
@@ -350,8 +350,10 @@ class TestFileManagementTools:
                 break
 
         fallback_result = await save_tool(input_data={"force_save": False})
-        assert fallback_result["status"] == "success"
-        assert "timestamp" in fallback_result
+        assert fallback_result["status"] == "error"
+        assert "nothing was written to disk" in fallback_result["message"]
+        # A timestamp here read as proof the save happened.
+        assert "timestamp" not in fallback_result
 
     @pytest.mark.asyncio
     async def test_save_file_adapter_error_path(
@@ -497,8 +499,8 @@ class TestFileManagementTools:
                 overwrite=False,
             )
         )
-        assert fallback_result["status"] == "success"
-        assert fallback_result["file_path"].endswith("fallback.step")
+        assert fallback_result["status"] == "error"
+        assert "no file was created" in fallback_result["message"]
 
     @pytest.mark.asyncio
     async def test_save_as_exception_path(self, mcp_server, mock_adapter, mock_config):

@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # SolidWorks MCP Server (Python)
 
 This file is the quick orientation guide for contributors and coding agents.
@@ -54,16 +58,67 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m mkdocs build --clean
 ```
 
+### Running tests
+
+`addopts` in `pyproject.toml` enables coverage with `--cov-fail-under=90`, so a
+partial run fails on coverage rather than on the tests. Pass `--no-cov` while
+iterating.
+
+```powershell
+# One file
+.\.venv\Scripts\python.exe -m pytest tests/solidworks_mcp/tools/test_drawing.py --no-cov
+
+# One test
+.\.venv\Scripts\python.exe -m pytest "tests/solidworks_mcp/adapters/test_adapters.py::TestPyWin32AdapterBranches::test_feature_creation_failure_paths" --no-cov
+
+# Whole suite, no SolidWorks needed (~2.5 min, ~1750 tests)
+.\.venv\Scripts\python.exe -m pytest tests -m "not solidworks_only" -q --no-cov
+
+# Live SolidWorks tests (deselected by default)
+$env:SOLIDWORKS_MCP_RUN_REAL_INTEGRATION=1
+.\.venv\Scripts\python.exe -m pytest tests -m "solidworks_only" --no-cov
+```
+
+`--tb=line` gives one line per failure with the file and line number, which is
+usually all you need. PowerShell mangles pytest's ANSI colour codes — redirect
+to a file with `--color=no` when parsing output.
+
 ## Architecture
 
 - Server entrypoint: `src/solidworks_mcp/server.py`
 - CLI entrypoint: `src/solidworks_mcp/server_cli_fixed.py`
 - Adapters: `src/solidworks_mcp/adapters/`
+  - `base.py`: `SolidWorksAdapter` ABC and the `AdapterResult` contract
   - `pywin32_adapter.py`: real SolidWorks COM adapter (Windows)
   - `mock_adapter.py`: mock adapter for tests and CI-like runs
   - `factory.py`: adapter selection/routing logic
+  - `circuit_breaker.py`, `connection_pool.py`: decorators that wrap an adapter
 - Tools: `src/solidworks_mcp/tools/` (modeling, sketching, drawing, export, analysis, automation, templates, VBA, docs discovery)
 - Agent harness: `src/solidworks_mcp/agents/` (prompt schemas, smoke test CLI, run/error persistence)
+
+`PyWin32Adapter` is a composition root, not a monolith. The COM implementations
+live in mixins under `adapters/solidworks/` (`pywin32_adapter.py:1460`):
+
+```python
+class PyWin32Adapter(
+    SolidWorksSketchMixin, SolidWorksFeaturesMixin,
+    SolidWorksIOMixin, SolidWorksSelectionMixin, SolidWorksAdapter,
+):
+```
+
+Where a capability actually lives:
+
+- `adapters/solidworks/io.py` — open/save/close, assemblies (`insert_component`,
+  `add_mate`), drawings (`add_drawing_view`, `create_standard_views`),
+  materials, appearance
+- `adapters/solidworks/features.py` — extrude/cut/revolve, patterns, fillet,
+  draft, body operations, `get_bounding_box`
+- `adapters/solidworks/sketch.py`, `adapters/solidworks/selection.py`
+
+Tool-layer input normalization is shared, not per-module: use
+`normalize_input(input_data, model_type)` from `tools/input_compat.py`
+(imported as `_normalize_input` by six tool modules) rather than writing
+another one.
 
 ## Key Patterns
 
@@ -72,6 +127,64 @@ python -m venv .venv
 - Prefer adapter abstraction, not direct COM calls from tool modules.
 - Keep Windows/COM behavior behind adapter boundaries.
 - Use mock adapter for tests unless a test explicitly requires real SolidWorks.
+
+### Adding an adapter capability — five layers
+
+A new adapter method needs **all five** of these plus tool registration. Miss
+one of the last two and it fails only against real SolidWorks: mock mode never
+exercises the decorators, and both decorators forward only methods they define
+explicitly — there is no `__getattr__` catch-all.
+
+1. Implementation in the relevant `adapters/solidworks/*.py` mixin.
+2. A default in `adapters/base.py` that returns a "not supported" error.
+3. A mock in `adapters/mock_adapter.py`.
+4. A pass-through in `adapters/circuit_breaker.py`. Pattern
+   (`circuit_breaker.py:862`):
+
+   ```python
+   async def set_material(self, name, database=None):
+       return await self._execute_with_circuit_breaker(
+           "set_material",
+           lambda: self.adapter.set_material(name, database),
+           input_dict={"name": name, "database": database},
+       )
+   ```
+
+5. A pass-through in `adapters/connection_pool.py`.
+
+Then register the tool with `@mcp.tool()` in the matching `tools/*.py`.
+
+### Verification discipline
+
+**Never trust a COM return value.** SolidWorks reports success for operations
+that did nothing, or that did damage. Observed on this build: `FeatureFillet3`
+returned `None` while the tool reported success; `pattern_circular` reported
+6 instances when the model had 2; `delete_face` destroyed the solid (0 bodies)
+and returned success. Confirm the effect independently — volume math, feature
+or instance counts, bounding boxes, a render — and raise when the check fails.
+
+**Never fabricate a payload.** A tool with no adapter support must return
+`status: "error"`, never a plausible-looking result. A fabricated
+`interference_found: False` is worse than no answer, because the caller acts on
+it. Guarded by `tests/solidworks_mcp/tools/test_no_fabricated_payloads.py` and
+`tests/solidworks_mcp/test_every_tool_handles_empty_input.py`.
+
+The trap to avoid is the `hasattr` fallback: call the adapter on the happy path,
+then invent a result when the capability is missing. It reads as defensive
+coding and it lies.
+
+```python
+if hasattr(adapter, "create_technical_drawing"):
+    ...                                  # real path
+return {"status": "success",             # never do this
+        "data": {"views_created": ["Front", "Right", "Top"]}}
+```
+
+`test_no_tool_invents_a_payload_when_the_adapter_cannot_help` flags any fallback
+that returns success while touching neither `adapter` nor `result`. If a tool
+genuinely needs no SolidWorks session (VBA text generation, comparing two files
+on disk, the on-disk template library), add it to `ADAPTER_FREE_TOOLS` with a
+reason instead.
 
 ### Logging and Output
 
@@ -271,7 +384,66 @@ Not every zero-arg accessor is a method. ``IConfiguration.Name``,
 When in doubt, check the gen_py wrapper: methods live in the class body
 as regular defs; properties use ``_prop_map_get_`` / ``_prop_map_put_``.
 
-### 5. Regression tests
+### 5. Flag only what you read
+
+``flag_methods(obj, iface)`` flags ~100 names and costs ~27 ms. Its cache is
+keyed on ``id(obj)``, so a loop over freshly-returned dispatches never hits it
+and pays the full cost every iteration. Use
+``sw_type_info.flag_members(obj, *names)`` (``sw_type_info.py:207``) to flag
+just the members you are about to touch.
+
+### 6. Raw PyIDispatch in COM arrays
+
+``GetViews``, ``GetComponents`` and friends return **raw** ``PyIDispatch``
+objects, not wrapped ones. Method flagging is a silent no-op on those — it
+neither errors nor takes effect. Wrap each element with
+``win32com.client.dynamic.Dispatch`` before flagging or calling it.
+
+### 7. Byref VARIANT out-parameters
+
+Nuances runbook item #1. ``pythoncom.Missing`` is not universally sufficient:
+``OpenDoc6`` and ``GetMaterialPropertyName2`` need real byref VARIANTs
+(``VARIANT(VT_BYREF | VT_I4)`` / ``VT_BSTR``) — with ``Missing`` they return
+``None`` or raise. ``SetMaterialPropertyValues`` needs
+``VARIANT(VT_ARRAY | VT_R8)``; a plain Python list raises.
+
+### 8. Call-then-fallback is narrow
+
+A late-bound member may resolve as a bound method *or* as a value, so the
+read helper calls it and falls back. The fallback must be limited to
+``TypeError`` (value not callable) and ``com_error`` (COM object value):
+
+```python
+try:
+    return member()
+except TypeError:
+    return member                              # already a value
+except Exception as exc:
+    if type(exc).__name__ == "com_error":
+        return member                          # COM object value
+    return None                                # genuine failure
+```
+
+A blanket ``except Exception: return member`` returns the bound method as data
+— that is how ``list_features`` came to report ``type: '<bound method ...>'``.
+
+### 9. Interface ownership
+
+The same method name can live on two interfaces with different signatures.
+``InsertScale`` is on ``IModelDoc2`` as (x, y, z, isUniform) and on
+``IFeatureManager`` as (Type, Uniform, X, Y, Z) — different arity *and* order.
+``DeleteFaces2`` is on ``IBody2``; ``InsertMoveFace`` is on ``IFeatureManager``.
+``IBody2::Select2`` takes a SelectData object as its second argument, while
+``IFace2::Select2`` takes a mark. Confirm ownership in the gen_py wrapper or
+via the `swapi-pilot` MCP before calling — never from memory.
+
+### 10. Known-broken on this build
+
+Do not re-litigate these; they were retried against valid solid geometry and
+still fail: ``InsertCombineFeature`` (boolean ops), ``InsertMoveFace``,
+``InsertRib``. Hole wizard and split body are simply unimplemented.
+
+### 11. Regression tests
 
 See ``tests/test_live_sw_regression.py`` for the safety net:
 

@@ -374,9 +374,8 @@ async def test_export_tools_fallback_and_aliases(mcp_server, mock_config):
             )
         )
     )["status"] == "success"
-    # batch_export's no-adapter fallback used to report a completed run
-    # with zero files; it errors now.
-    # batch_export errors without adapter support.
+    # batch_export's no-adapter fallback used to report a completed run with
+    # zero files. This adapter only exports one file at a time, so it errors.
     assert (
         await (await _tool(mcp_server, "batch_export"))(
             input_data=BatchExportInput(
@@ -386,7 +385,7 @@ async def test_export_tools_fallback_and_aliases(mcp_server, mock_config):
                 file_pattern="*.sldprt",
             )
         )
-    )["status"] == "success"
+    )["status"] == "error"
 
     error_result = await (await _tool(mcp_server, "export_step"))(
         input_data={"file_path": None, "format_type": "step"}
@@ -410,7 +409,7 @@ async def test_drawing_analysis_simulation_paths(mcp_server, mock_config):
         await (await _tool(mcp_server, "analyze_drawing_dimensions"))(
             input_data=DimensionAnalysisInput(drawing_path="a.slddrw")
         )
-    )["status"] == "success"
+    )["status"] == "error"
     assert (
         await (await _tool(mcp_server, "analyze_drawing_annotations"))(
             input_data=AnnotationAnalysisInput(drawing_path="a.slddrw")

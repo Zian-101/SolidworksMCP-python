@@ -440,7 +440,7 @@ class TestDrawingToolsBranchCoverage:
     async def test_create_technical_drawing_no_adapter_no_views(
         self, mcp_server, mock_adapter, mock_config
     ):
-        """Create_technical_drawing simulation path with auto_populate_views=False."""
+        """create_technical_drawing refuses when the adapter cannot make one."""
         await register_drawing_tools(mcp_server, mock_adapter, mock_config)
         if hasattr(mock_adapter, "create_technical_drawing"):
             del mock_adapter.create_technical_drawing
@@ -459,8 +459,8 @@ class TestDrawingToolsBranchCoverage:
             None,
         )
         result = await tool_func(input_data=input_data)
-        assert result["status"] == "success"
-        assert result["data"]["views_created"] == []
+        assert result["status"] == "error"
+        assert "no drawing file was produced" in result["message"]
 
     @pytest.mark.asyncio
     async def test_create_technical_drawing_adapter_success(
@@ -552,7 +552,7 @@ class TestDrawingToolsBranchCoverage:
     async def test_add_annotation_no_adapter_simulation(
         self, mcp_server, mock_adapter, mock_config
     ):
-        """Add_annotation falls back to simulation when adapter lacks add_annotation."""
+        """add_annotation refuses when the adapter lacks add_annotation."""
         await register_drawing_tools(mcp_server, mock_adapter, mock_config)
         if hasattr(mock_adapter, "add_annotation"):
             del mock_adapter.add_annotation
@@ -568,8 +568,8 @@ class TestDrawingToolsBranchCoverage:
             None,
         )
         result = await tool_func(input_data=input_data)
-        assert result["status"] == "success"
-        assert result["data"]["annotation_text"] == "MaterialSpec"
+        assert result["status"] == "error"
+        assert "nothing was placed on the drawing" in result["message"]
 
     # ── update_title_block: adapter error + no-adapter paths ───────────────
 
@@ -601,7 +601,7 @@ class TestDrawingToolsBranchCoverage:
     async def test_update_title_block_no_adapter_simulation(
         self, mcp_server, mock_adapter, mock_config
     ):
-        """Update_title_block simulation path when adapter lacks the method."""
+        """update_title_block refuses when the adapter lacks the method."""
         await register_drawing_tools(mcp_server, mock_adapter, mock_config)
         if hasattr(mock_adapter, "update_title_block"):
             del mock_adapter.update_title_block
@@ -616,8 +616,8 @@ class TestDrawingToolsBranchCoverage:
             None,
         )
         result = await tool_func(input_data=payload)
-        assert result["status"] == "success"
-        assert result["data"]["title"] == "Widget"
+        assert result["status"] == "error"
+        assert "no fields were changed" in result["message"]
 
     @pytest.mark.asyncio
     async def test_typed_drawing_tools_default_error_messages(

@@ -586,28 +586,25 @@ class TestDrawingAnalysisTools:
         # The quality score was invented for a drawing never opened.
         assert comprehensive_result["status"] == "error"
 
+        # "52 dimensions", "86 overall", "82 compliant" were all invented for a
+        # drawing that was never opened. Each tool refuses now.
         dimension_result = await dimension_tool(
             input_data=DimensionAnalysisInput(drawing_path="demo.slddrw")
         )
-        assert dimension_result["status"] == "success"
-        assert (
-            dimension_result["dimension_analysis"]["dimension_inventory"][
-                "total_dimensions"
-            ]
-            == 52
-        )
+        assert dimension_result["status"] == "error"
+        assert "never opened" in dimension_result["message"]
 
         annotation_result = await annotation_tool(
             input_data=AnnotationAnalysisInput(drawing_path="demo.slddrw")
         )
-        assert annotation_result["status"] == "success"
-        assert annotation_result["quality_scores"]["overall_score"] == 86
+        assert annotation_result["status"] == "error"
+        assert "never opened" in annotation_result["message"]
 
         compliance_result = await compliance_tool(
             input_data=ComplianceCheckInput(drawing_path="demo.slddrw", standard="ISO")
         )
-        assert compliance_result["status"] == "success"
-        assert compliance_result["overall_compliance"]["score"] == 82
+        assert compliance_result["status"] == "error"
+        assert "compliance score" in compliance_result["message"]
 
         compare_result = await compare_tool(
             input_data={
@@ -626,8 +623,9 @@ class TestDrawingAnalysisTools:
                 "manufacturing_type": "machining",
             }
         )
-        assert completeness_result["status"] == "success"
-        assert completeness_result["validation_results"]["completeness_score"] == 87
+        # The 87% completeness score was invented too. The tool reads the real
+        # view list now, which this adapter cannot provide.
+        assert completeness_result["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_drawing_analysis_adapter_error_and_exception_paths(

@@ -41,6 +41,12 @@ ADAPTER_FREE_TOOLS = {
     "generate_vba_drawing_dimensions",
     "generate_vba_file_operations",
     "generate_vba_macro_recorder",
+    # Same deal: these build the macro text from their inputs. The VBA is real
+    # output, not a stand-in for work SolidWorks was supposed to do.
+    "generate_vba_assembly_insert",
+    "generate_vba_batch_export",
+    "generate_vba_drawing_views",
+    "generate_vba_code",  # emits a labelled skeleton and says so
     # These refuse honestly instead of inventing a result.
     "create_section_view",
     "create_detail_view",
@@ -60,6 +66,10 @@ ADAPTER_FREE_TOOLS = {
     "compare_templates",
     "create_template",
     "extract_template",
+    # The template library is a JSON file on disk: these read and write it, and
+    # stat the referenced template files. No SolidWorks session involved.
+    "list_template_library",
+    "save_to_template_library",
 }
 
 
@@ -93,6 +103,98 @@ def test_no_new_tools_fabricate_their_answer() -> None:
         "These tools never reach the adapter, so they cannot be returning real "
         f"data: {sorted(offenders)}. Either wire them to the adapter or make "
         "them report an error."
+    )
+
+
+def _statement_lists(node: ast.AST) -> list[list[ast.stmt]]:
+    """Every list-of-statements anywhere beneath `node`.
+
+    The fabricating fallbacks live inside the tool's `try:` block, not directly
+    in the function body, so scanning `fn.body` alone finds nothing.
+    """
+    lists: list[list[ast.stmt]] = []
+    for child in ast.walk(node):
+        for _field, value in ast.iter_fields(child):
+            if (
+                isinstance(value, list)
+                and value
+                and all(isinstance(item, ast.stmt) for item in value)
+            ):
+                lists.append(value)
+    return lists
+
+
+def _tools_with_fabricated_fallback() -> set[str]:
+    """Return tools whose no-adapter-support branch invents a success payload.
+
+    The shape this catches:
+
+        if hasattr(adapter, "do_thing"):
+            result = await adapter.do_thing(...)   # real path
+            ...
+        return {"status": "success", "data": {...literals...}}
+
+    The tool mentions `adapter.` on the real path, so
+    `_tools_without_adapter` is satisfied while the fallback still lies. A
+    fallback that reaches `adapter` again (export_step falls back to
+    `adapter.export_file`) or that reads `result` is doing real work and is
+    not flagged.
+    """
+    offenders: set[str] = set()
+    for path in sorted(TOOLS_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            decorated = any(
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and d.func.attr == "tool"
+                for d in node.decorator_list
+            )
+            if not decorated:
+                continue
+            for statements in _statement_lists(node):
+                for index, statement in enumerate(statements):
+                    if not isinstance(statement, ast.If):
+                        continue
+                    test = ast.get_source_segment(source, statement.test) or ""
+                    if "hasattr(adapter" not in test:
+                        continue
+                    fallback = list(statement.orelse) + list(statements[index + 1 :])
+                    text = " ".join(
+                        (ast.get_source_segment(source, s) or "") for s in fallback
+                    )
+                    if '"status": "success"' not in text:
+                        continue
+                    if "adapter." in text or "result" in text:
+                        continue
+                    # Qualified by file: two modules define start_macro_recording
+                    # and only one of them fabricates.
+                    offenders.add(f"{path.name}::{node.name}")
+    return offenders
+
+
+def test_no_tool_invents_a_payload_when_the_adapter_cannot_help() -> None:
+    """A tool with no adapter support must refuse, not improvise.
+
+    `test_no_new_tools_fabricate_their_answer` only asks whether a tool
+    mentions the adapter at all. That let 25 tools through which call the
+    adapter on the happy path and then fabricate when the capability is
+    missing — including `save_file` reporting "File saved successfully" with a
+    fresh timestamp for a save that never happened.
+    """
+    offenders = {
+        qualified
+        for qualified in _tools_with_fabricated_fallback()
+        if qualified.split("::", 1)[1] not in ADAPTER_FREE_TOOLS
+    }
+    assert not offenders, (
+        "These tools invent a success payload when the adapter cannot do the "
+        f"job: {sorted(offenders)}. Return an error naming the missing "
+        "capability, or add the tool to ADAPTER_FREE_TOOLS if it genuinely "
+        "needs no SolidWorks session."
     )
 
 

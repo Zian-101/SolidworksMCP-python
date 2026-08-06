@@ -607,5 +607,7 @@ class TestExportToolsBranchCoverage:
                 output_path="model.png",
             )
         )
-        assert simulated["status"] == "success"
-        assert simulated["export"]["file_path"] == "model.sldprt"
+        # With neither export_image nor export_file, no image was written and
+        # the tool used to report one anyway.
+        assert simulated["status"] == "error"
+        assert "no image file was written" in simulated["message"]

@@ -553,8 +553,10 @@ class TestMacroRecordingTools:
                 output_file="fallback.swp",
             )
         )
-        assert start_result["status"] == "success"
-        assert start_result["recording_session"]["status"] == "recording"
+        # Nothing was ever recording: SolidWorks drives that from its UI.
+        assert start_result["status"] == "error"
+        assert "recording" in start_result["message"]
+        assert "recording_session" not in start_result
 
         execute_result = await execute_tool(
             input_data=MacroPlaybackInput(
@@ -641,8 +643,10 @@ class TestMacroRecordingTools:
         assert execute_tool is not None
 
         sleep_calls: list[float] = []
+        # Patch the stdlib directly: the module no longer imports `time` at
+        # all, which is itself part of what this test pins down.
         monkeypatch.setattr(
-            "solidworks_mcp.tools.macro_recording.time.sleep",
+            "time.sleep",
             lambda seconds: sleep_calls.append(float(seconds)),
         )
 

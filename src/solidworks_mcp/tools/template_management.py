@@ -561,6 +561,7 @@ async def register_template_management_tools(
 
         Args:
             input_data (dict[str, Any] | None): Optional ``category`` filter.
+                ``"all"`` or an empty value lists every registered template.
 
         Returns:
             dict[str, Any]: The stored entries and real statistics.
@@ -582,6 +583,10 @@ async def register_template_management_tools(
 
             payload = input_data or {}
             wanted = str(payload.get("category", "") or "").strip().lower()
+            # "all" is the sentinel callers reach for; treating it as a literal
+            # category name silently returned an empty library.
+            if wanted == "all":
+                wanted = ""
 
             library = _load_library()
             templates = library["templates"]

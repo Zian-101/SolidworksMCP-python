@@ -1023,18 +1023,15 @@ async def register_drawing_tools(
                     "message": result.error or "Failed to create technical drawing",
                 }
 
+            # This reported a drawing at output_path, with a list of views
+            # that were never placed, for a file that was never created.
             return {
-                "status": "success",
-                "message": "Technical drawing created successfully",
-                "data": {
-                    "drawing_path": input_data.output_path,
-                    "template_used": input_data.template,
-                    "views_created": ["Front", "Right", "Top"]
-                    if input_data.auto_populate_views
-                    else [],
-                    "sheet_format": input_data.sheet_format,
-                    "scale": input_data.scale,
-                },
+                "status": "error",
+                "message": (
+                    "Cannot create a technical drawing: this adapter does not "
+                    "implement create_technical_drawing, so no drawing file "
+                    "was produced."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in create_technical_drawing tool: {e}")
@@ -1069,14 +1066,12 @@ async def register_drawing_tools(
                 }
 
             return {
-                "status": "success",
-                "message": "Drawing view added successfully",
-                "data": {
-                    "view_name": input_data.view_name,
-                    "view_type": input_data.view_type,
-                    "position": input_data.position,
-                    "scale": input_data.scale,
-                },
+                "status": "error",
+                "message": (
+                    f"Cannot add the {input_data.view_type} view "
+                    f"'{input_data.view_name}': this adapter does not "
+                    "implement add_drawing_view, so the drawing is unchanged."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in add_drawing_view tool: {e}")
@@ -1111,14 +1106,12 @@ async def register_drawing_tools(
                 }
 
             return {
-                "status": "success",
-                "message": "Annotation added successfully",
-                "data": {
-                    "annotation_text": input_data.text,
-                    "annotation_type": input_data.annotation_type,
-                    "position": [input_data.position_x, input_data.position_y],
-                    "font_size": input_data.font_size,
-                },
+                "status": "error",
+                "message": (
+                    "Cannot add the annotation: this adapter does not "
+                    "implement add_annotation, so nothing was placed on the "
+                    "drawing."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in add_annotation tool: {e}")
@@ -1153,9 +1146,11 @@ async def register_drawing_tools(
                 }
 
             return {
-                "status": "success",
-                "message": "Title block updated successfully",
-                "data": input_data,
+                "status": "error",
+                "message": (
+                    "Cannot update the title block: this adapter does not "
+                    "implement update_title_block, so no fields were changed."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in update_title_block tool: {e}")

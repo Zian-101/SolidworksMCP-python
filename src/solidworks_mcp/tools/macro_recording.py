@@ -4,7 +4,6 @@ Provides tools for recording, managing, and executing SolidWorks macros for auto
 and workflow optimization.
 """
 
-import time
 from typing import Any
 
 from fastmcp import FastMCP
@@ -210,43 +209,16 @@ async def register_macro_recording_tools(
                     "message": result.error or "Failed to start recording",
                 }
 
-            recording_session = {
-                "session_id": f"REC-{int(time.time() * 1000) % 100000}",
-                "macro_name": input_data.macro_name,
-                "description": input_data.description,
-                "start_time": time.time(),
-                "status": "recording",
-                "auto_stop": input_data.auto_stop,
-                "timeout": input_data.timeout_seconds,
-                "recorded_actions": [],
-                "estimated_file_size": "0 KB",
-            }
-
-            # In real implementation, this would interface with SolidWorks macro recorder
-            recording_instructions = [
-                "1. SolidWorks macro recording has started",
-                "2. Perform the actions you want to automate",
-                "3. Use stop_macro_recording when complete",
-                "4. Avoid unnecessary mouse movements for cleaner macros",
-            ]
-
+            # This handed back a session id, "status": "recording" and a page
+            # of tips while SolidWorks did nothing at all.
             return {
-                "status": "success",
-                "message": f"Macro recording started: {input_data.macro_name}",
-                "recording_session": recording_session,
-                "instructions": recording_instructions,
-                "best_practices": [
-                    "Work slowly and deliberately for better recording",
-                    "Use keyboard shortcuts when possible",
-                    "Avoid redundant actions",
-                    "Test in a simple model first",
-                ],
-                "recording_tips": {
-                    "feature_creation": "Select sketch before recording feature creation",
-                    "selection": "Use feature tree selection instead of graphics area when possible",
-                    "views": "Use standard view orientations for consistency",
-                    "properties": "Access properties through feature tree right-click",
-                },
+                "status": "error",
+                "message": (
+                    "Starting a macro recording is not supported through this "
+                    "adapter - SolidWorks drives recording from its UI. Use "
+                    "Tools > Macro > Record, or generate a macro with the "
+                    "generate_vba_* tools."
+                ),
             }
 
         except Exception as e:
@@ -342,37 +314,6 @@ async def register_macro_recording_tools(
                 "requested": {
                     "macro_path": input_data.macro_path,
                     "repeat_count": input_data.repeat_count,
-                },
-            }
-
-            execution_results: list[dict[str, Any]] = []
-            total_time = 0.0
-            total_features = 0
-
-            return {
-                "status": "success",
-                "message": f"Macro executed {input_data.repeat_count} times successfully",
-                "data": {
-                    "macro_path": input_data.macro_path,
-                    "parameters_used": input_data.parameters,
-                    "repeat_count": input_data.repeat_count,
-                    "pause_between_runs": input_data.pause_between_runs,
-                    "total_execution_time": total_time,
-                    "total_features_created": total_features,
-                },
-                "macro_execution": {
-                    "macro_path": input_data.macro_path,
-                    "parameters_used": input_data.parameters,
-                    "repeat_count": input_data.repeat_count,
-                    "pause_between_runs": input_data.pause_between_runs,
-                    "total_execution_time": total_time,
-                    "total_features_created": total_features,
-                },
-                "run_details": execution_results,
-                "performance_metrics": {
-                    "average_run_time": total_time / input_data.repeat_count,
-                    "features_per_second": total_features / total_time,
-                    "success_rate": "100%",
                 },
             }
 

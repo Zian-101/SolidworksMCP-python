@@ -317,10 +317,15 @@ async def register_file_management_tools(
                     "message": result.error or "Failed to save file",
                 }
 
+            # This used to report "File saved successfully" with a fresh
+            # timestamp for a save that never happened.
             return {
-                "status": "success",
-                "message": "File saved successfully",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "error",
+                "message": (
+                    "Saving is not supported through this adapter, so nothing "
+                    "was written to disk. Connect an adapter that implements "
+                    "save_file before relying on this tool."
+                ),
             }
 
         except Exception as e:
@@ -407,12 +412,15 @@ async def register_file_management_tools(
                     "message": result.error or "Failed to export file",
                 }
 
-            # Fallback for adapters without save/export support.
+            # This echoed the requested path back as though the file had been
+            # written. No adapter here can write it.
             return {
-                "status": "success",
-                "message": f"File saved as: {input_data.file_path}",
-                "file_path": input_data.file_path,
-                "format": input_data.format_type,
+                "status": "error",
+                "message": (
+                    f"Cannot save to {input_data.file_path}: this adapter "
+                    "supports neither save_as nor export_file, so no file was "
+                    "created."
+                ),
             }
 
         except Exception as e:
@@ -724,12 +732,12 @@ async def register_file_management_tools(
                     "message": result.error or "Failed to manage file properties",
                 }
             return {
-                "status": "success",
-                "message": "File properties managed successfully",
-                "data": {
-                    "file_path": input_data.file_path,
-                    "operation": input_data.operation,
-                },
+                "status": "error",
+                "message": (
+                    f"Cannot {input_data.operation} file properties: this "
+                    "adapter does not implement manage_file_properties, so "
+                    "nothing was read or changed."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in manage_file_properties tool: {e}")
@@ -764,13 +772,13 @@ async def register_file_management_tools(
                     "message": result.error or "Failed to convert file format",
                 }
             return {
-                "status": "success",
-                "message": "File converted successfully",
-                "data": {
-                    "source_file": input_data.source_file,
-                    "target_file": input_data.target_file or input_data.output_path,
-                    "format_to": input_data.target_format,
-                },
+                "status": "error",
+                "message": (
+                    f"Cannot convert {input_data.source_file} to "
+                    f"{input_data.target_format}: this adapter does not "
+                    "implement convert_file_format, so no output file was "
+                    "written."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in convert_file_format tool: {e}")
@@ -805,12 +813,12 @@ async def register_file_management_tools(
                     "message": result.error or "Failed to run batch file operations",
                 }
             return {
-                "status": "success",
-                "message": "Batch file operations completed successfully",
-                "data": {
-                    "file_path": input_data.file_path,
-                    "operation": input_data.operation,
-                },
+                "status": "error",
+                "message": (
+                    f"Cannot run batch {input_data.operation}: this adapter "
+                    "does not implement batch_file_operations, so no files "
+                    "were touched."
+                ),
             }
         except Exception as e:
             logger.error(f"Error in batch_file_operations tool: {e}")

@@ -413,7 +413,7 @@ class TestAutomationTools:
     async def test_automation_fallback_paths_without_adapter_methods(
         self, mcp_server, mock_config
     ):
-        """Test fallback simulation branches for all automation tools."""
+        """With no adapter, automation tools refuse rather than invent a result."""
         await register_automation_tools(mcp_server, object(), mock_config)
 
         by_name = {tool.name: tool.fn for tool in await mcp_server.list_tools()}
@@ -459,16 +459,13 @@ class TestAutomationTools:
         assert start["status"] == "error"
         # Nothing was recording, so there is nothing to stop.
         assert stop["status"] == "error"
-        assert batch["status"] == "success"
-        assert batch["batch_process"]["files_found"] == 25
-        assert table["status"] == "success"
-        assert table["design_table"]["operation"] == "create"
-        assert workflow["status"] == "success"
-        assert workflow["workflow"]["total_steps"] == 1
-        assert template["status"] == "success"
-        assert template["template"]["type"] == "part"
-        assert optimize["status"] == "success"
-        assert optimize["optimization"]["settings_optimized"] == 12
+        # "25 files found", "1 step run", "12 settings optimized" were all
+        # invented: no directory was read, no workflow ran, nothing was tuned.
+        assert batch["status"] == "error"
+        assert table["status"] == "error"
+        assert workflow["status"] == "error"
+        assert template["status"] == "error"
+        assert optimize["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_automation_exception_paths_from_adapter_methods(
@@ -531,11 +528,12 @@ class TestAutomationTools:
         assert table["status"] == "error"
         assert "Failed to manage design table" in table["message"]
         assert workflow["status"] == "error"
-        assert "Unexpected error" in workflow["message"]
+        # Specific, like its siblings above, so the caller knows which stage failed.
+        assert "Failed to execute workflow" in workflow["message"]
         assert template["status"] == "error"
-        assert "Unexpected error" in template["message"]
+        assert "Failed to create template" in template["message"]
         assert optimize["status"] == "error"
-        assert "Unexpected error" in optimize["message"]
+        assert "Failed to optimize performance" in optimize["message"]
 
     @pytest.mark.asyncio
     async def test_automation_remaining_error_returns(

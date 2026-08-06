@@ -408,8 +408,13 @@ class TestTemplateManagementTools:
         assert "Source model file not found" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_template_management_fallback_paths(self, mcp_server, mock_config):
-        """Test fallback simulation payloads when adapter methods are unavailable."""
+    async def test_template_management_fallback_paths(
+        self, mcp_server, mock_config, tmp_path, monkeypatch
+    ):
+        """Template tools refuse, or do real file work, when the adapter cannot help."""
+        # The library lives under LOCALAPPDATA; point it at a temp dir so this
+        # test neither reads nor pollutes the developer's real library.
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
         await register_template_management_tools(mcp_server, object(), mock_config)
 
         extract_tool = None
@@ -500,11 +505,32 @@ class TestTemplateManagementTools:
         # does not exist is reported instead of being recorded.
         assert save_result["status"] == "error"
 
+        # An empty library lists nothing rather than a catalogue nobody saved.
+        empty_list = await list_tool(
+            input_data={"category": "all", "search_term": "", "sort_by": "name"}
+        )
+        assert empty_list["status"] == "success"
+        assert empty_list["templates"] == []
+
+        # Register a template that really exists, then it shows up.
+        real_template = tmp_path / "real.prtdot"
+        real_template.write_bytes(b"template payload")
+        recorded = await save_tool(
+            input_data={
+                "template_name": "Real Template",
+                "template_path": str(real_template),
+                "category": "parts",
+                "author": "QA",
+            }
+        )
+        assert recorded["status"] == "success"
+
         list_result = await list_tool(
             input_data={"category": "all", "search_term": "", "sort_by": "name"}
         )
         assert list_result["status"] == "success"
         assert len(list_result["templates"]) >= 1
+        assert list_result["templates"][0]["name"] == "Real Template"
 
     @pytest.mark.asyncio
     async def test_template_management_adapter_error_and_exception_paths(

@@ -256,81 +256,12 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Failed to analyze dimensions",
                 }
 
-            dimension_analysis = {
-                "dimension_inventory": {
-                    "total_dimensions": 52,
-                    "by_type": {
-                        "linear": {"count": 31, "percentage": 59.6},
-                        "angular": {"count": 7, "percentage": 13.5},
-                        "radial": {"count": 9, "percentage": 17.3},
-                        "diameter": {"count": 5, "percentage": 9.6},
-                    },
-                    "by_view": {
-                        "front_view": 18,
-                        "top_view": 15,
-                        "right_view": 12,
-                        "section_a": 7,
-                    },
-                },
-                "precision_analysis": {
-                    "precision_distribution": {
-                        "0_decimals": 8,
-                        "1_decimal": 5,
-                        "2_decimals": 35,
-                        "3_decimals": 4,
-                    },
-                    "consistency_score": 67,
-                    "recommendations": [
-                        "Standardize to 2 decimal places",
-                        "Consider whole numbers for non-critical dimensions",
-                    ],
-                },
-                "tolerance_analysis": {
-                    "dimensions_with_tolerances": 18,
-                    "tolerance_coverage": 34.6,  # percentage
-                    "tolerance_types": {
-                        "bilateral": {"count": 12, "example": "±0.05"},
-                        "unilateral": {"count": 4, "example": "+0.05/-0.00"},
-                        "limit": {"count": 2, "example": "10.05/9.95"},
-                    },
-                    "critical_dimensions": {
-                        "identified": 8,
-                        "toleranced": 6,
-                        "missing_tolerances": ["Ø12 hole depth", "45° chamfer"],
-                    },
-                },
-                "completeness_check": {
-                    "fully_dimensioned_features": {
-                        "holes": {"total": 4, "dimensioned": 4, "complete": True},
-                        "slots": {"total": 2, "dimensioned": 1, "complete": False},
-                        "chamfers": {"total": 3, "dimensioned": 2, "complete": False},
-                        "radii": {"total": 5, "dimensioned": 5, "complete": True},
-                    },
-                    "missing_dimensions": [
-                        "Slot width in top view",
-                        "Chamfer size (45° x ?))",
-                    ],
-                    "redundant_dimensions": ["Overall length shown twice"],
-                    "completeness_score": 88,
-                },
-            }
-
             return {
-                "status": "success",
-                "message": "Dimension analysis completed",
-                "dimension_analysis": dimension_analysis,
-                "quality_metrics": {
-                    "precision_consistency": "Needs Improvement",
-                    "tolerance_coverage": "Adequate",
-                    "completeness": "Good",
-                    "overall_score": 78,
-                },
-                "action_items": [
-                    "Add tolerance to slot width dimension",
-                    "Dimension the 45° chamfer completely",
-                    "Remove redundant overall length dimension",
-                    "Standardize precision to 2 decimal places",
-                ],
+                "status": "error",
+                "message": (
+                    "Cannot analyze dimensions: this adapter does not implement "
+                    "analyze_drawing_dimensions, so the drawing was never opened."
+                ),
             }
 
         except Exception as e:
@@ -377,96 +308,13 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Failed to analyze annotations",
                 }
 
-            annotation_analysis = {
-                "notes_analysis": {
-                    "total_notes": 8,
-                    "note_categories": {
-                        "general_notes": 4,
-                        "manufacturing_notes": 3,
-                        "material_notes": 1,
-                    },
-                    "formatting_consistency": {
-                        "font_type": "Arial - Consistent",
-                        "text_heights": {
-                            "3.5mm": 5,
-                            "2.5mm": 2,
-                            "4.0mm": 1,  # Non-standard
-                        },
-                        "alignment": "Left aligned - Consistent",
-                        "issues": ["One note uses non-standard 4.0mm height"],
-                    },
-                    "content_quality": {
-                        "clarity": "Good",
-                        "completeness": "Good",
-                        "standardization": "Needs improvement",
-                        "suggestions": [
-                            "Use standard phrases for common notes",
-                            "Consider abbreviation standards",
-                        ],
-                    },
-                },
-                "symbols_analysis": {
-                    "total_symbols": 16,
-                    "symbol_types": {
-                        "surface_finish": {
-                            "count": 9,
-                            "standards_compliance": "ISO 1302 - Compliant",
-                            "placement": "Good",
-                            "size": "Standard",
-                        },
-                        "geometric_tolerances": {
-                            "count": 5,
-                            "standards_compliance": "ISO 1101 - Compliant",
-                            "feature_control_frames": "Properly formatted",
-                            "datum_references": "Complete",
-                        },
-                        "welding_symbols": {
-                            "count": 2,
-                            "standards_compliance": "ISO 2553 - Compliant",
-                            "completeness": "All required elements present",
-                        },
-                    },
-                    "placement_analysis": {
-                        "readability": "Good",
-                        "interference": "None detected",
-                        "leader_line_quality": "Good",
-                    },
-                },
-                "text_style_analysis": {
-                    "font_consistency": {
-                        "primary_font": "Arial - Used 87% of text",
-                        "secondary_font": "Times New Roman - Used 13%",
-                        "recommendation": "Standardize to single font family",
-                    },
-                    "size_hierarchy": {
-                        "title_text": "7.0mm - Appropriate",
-                        "dimension_text": "3.5mm - Standard",
-                        "note_text": "2.5mm - Standard",
-                        "label_text": "2.0mm - Small but acceptable",
-                    },
-                    "color_usage": {
-                        "black_text": "95% - Standard",
-                        "colored_text": "5% - Used for emphasis",
-                        "compliance": "Good",
-                    },
-                },
-            }
-
             return {
-                "status": "success",
-                "message": "Annotation analysis completed",
-                "annotation_analysis": annotation_analysis,
-                "quality_scores": {
-                    "notes_quality": 85,
-                    "symbol_compliance": 95,
-                    "text_consistency": 78,
-                    "overall_score": 86,
-                },
-                "improvement_areas": [
-                    "Standardize note text height to 2.5mm",
-                    "Use consistent font family throughout",
-                    "Review and standardize note terminology",
-                ],
+                "status": "error",
+                "message": (
+                    "Cannot analyze annotations: this adapter does not implement "
+                    "analyze_drawing_annotations, so the drawing was never "
+                    "opened."
+                ),
             }
 
         except Exception as e:
@@ -511,153 +359,13 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Compliance check failed",
                 }
 
-            compliance_check = {
-                "standard_info": {
-                    "standard": input_data.standard,
-                    "full_name": "ISO 128 - Technical drawings"
-                    if input_data.standard == "ISO"
-                    else input_data.standard,
-                    "version": "2022",
-                    "check_date": "2024-01-15",
-                },
-                "title_block_compliance": {
-                    "required_elements": [
-                        {
-                            "element": "Drawing title",
-                            "present": True,
-                            "compliant": True,
-                        },
-                        {
-                            "element": "Drawing number",
-                            "present": True,
-                            "compliant": True,
-                        },
-                        {"element": "Scale", "present": True, "compliant": True},
-                        {"element": "Date", "present": True, "compliant": True},
-                        {"element": "Drawn by", "present": True, "compliant": True},
-                        {"element": "Checked by", "present": False, "compliant": False},
-                        {
-                            "element": "Approved by",
-                            "present": False,
-                            "compliant": False,
-                        },
-                        {"element": "Revision", "present": True, "compliant": True},
-                    ],
-                    "compliance_score": 75,
-                    "missing_elements": ["Checked by", "Approved by"],
-                    "format_compliance": "Good",
-                },
-                "sheet_format_compliance": {
-                    "paper_size": {"specified": "A3", "compliant": True},
-                    "margins": {
-                        "left": 20,
-                        "right": 10,
-                        "top": 10,
-                        "bottom": 10,
-                        "compliant": True,
-                    },
-                    "sheet_orientation": {
-                        "orientation": "Landscape",
-                        "compliant": True,
-                    },
-                    "zone_markings": {
-                        "present": True,
-                        "format": "A1-H8",
-                        "compliant": True,
-                    },
-                },
-                "line_type_compliance": {
-                    "visible_lines": {
-                        "weight": "0.5mm",
-                        "type": "Continuous",
-                        "compliant": True,
-                    },
-                    "hidden_lines": {
-                        "weight": "0.25mm",
-                        "type": "Dashed",
-                        "compliant": True,
-                    },
-                    "centerlines": {
-                        "weight": "0.25mm",
-                        "type": "Chain-dotted",
-                        "compliant": True,
-                    },
-                    "dimension_lines": {
-                        "weight": "0.25mm",
-                        "type": "Continuous",
-                        "compliant": True,
-                    },
-                    "leader_lines": {
-                        "weight": "0.25mm",
-                        "type": "Continuous",
-                        "compliant": True,
-                    },
-                },
-                "text_compliance": {
-                    "font_requirements": {
-                        "required": "ISO 3098",
-                        "used": "Arial",
-                        "compliant": "Acceptable alternative",
-                    },
-                    "minimum_height": {
-                        "required": "2.5mm",
-                        "smallest_used": "2.0mm",
-                        "compliant": False,
-                    },
-                    "character_spacing": {"spacing": "Standard", "compliant": True},
-                },
-                "dimension_compliance": {
-                    "dimension_style": {"style": "ISO", "compliant": True},
-                    "arrow_style": {
-                        "style": "Closed filled",
-                        "size": "2.5mm",
-                        "compliant": True,
-                    },
-                    "extension_lines": {
-                        "offset": "0.5mm",
-                        "extension": "2.0mm",
-                        "compliant": True,
-                    },
-                    "text_placement": {
-                        "position": "Above line",
-                        "alignment": "Center",
-                        "compliant": True,
-                    },
-                },
-            }
-
-            overall_score = 82
-            critical_issues = [
-                "Missing approval signatures",
-                "Text height below minimum",
-            ]
-            warnings = ["Non-standard font used", "Inconsistent dimension precision"]
-
             return {
-                "status": "success",
-                "message": f"Standards compliance check completed for {input_data.standard}",
-                "compliance_check": compliance_check,
-                "overall_compliance": {
-                    "score": overall_score,
-                    "level": "Good" if overall_score >= 80 else "Needs Improvement",
-                    "critical_issues": len(critical_issues),
-                    "warnings": len(warnings),
-                },
-                "critical_issues": critical_issues,
-                "warnings": warnings,
-                "recommendations": [
-                    "Add approval signatures to title block",
-                    "Increase minimum text height to 2.5mm",
-                    "Consider using ISO 3098 compliant font",
-                    "Standardize dimension precision",
-                ],
-                "certification": {
-                    "certifiable": overall_score >= 85,
-                    "required_score": 85,
-                    "improvements_needed": 85 - overall_score
-                    if overall_score < 85
-                    else 0,
-                },
+                "status": "error",
+                "message": (
+                    "Cannot check drafting compliance: this adapter does not "
+                    "implement check_drawing_compliance. No compliance score can "
+                    "be reported for a drawing that was never opened."
+                ),
             }
 
         except Exception as e:
@@ -700,128 +408,12 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Failed to analyze drawing views",
                 }
 
-            input_data.get("drawing_path", "")
-
-            view_analysis = {
-                "view_inventory": {
-                    "total_views": 7,
-                    "view_breakdown": {
-                        "standard_orthographic": {
-                            "front": {
-                                "present": True,
-                                "scale": "1:1",
-                                "clarity": "Excellent",
-                            },
-                            "top": {"present": True, "scale": "1:1", "clarity": "Good"},
-                            "right": {
-                                "present": True,
-                                "scale": "1:1",
-                                "clarity": "Good",
-                            },
-                            "left": {"present": False, "needed": False},
-                            "rear": {"present": False, "needed": False},
-                            "bottom": {"present": False, "needed": False},
-                        },
-                        "auxiliary_views": {
-                            "count": 1,
-                            "purpose": "Show true shape of angled surface",
-                            "effectiveness": "Good",
-                        },
-                        "section_views": {
-                            "count": 2,
-                            "sections": [
-                                {
-                                    "name": "Section A-A",
-                                    "type": "Full section",
-                                    "clarity": "Excellent",
-                                },
-                                {
-                                    "name": "Section B-B",
-                                    "type": "Half section",
-                                    "clarity": "Good",
-                                },
-                            ],
-                        },
-                        "detail_views": {
-                            "count": 1,
-                            "details": [
-                                {
-                                    "name": "Detail C",
-                                    "scale": "2:1",
-                                    "feature": "Thread detail",
-                                    "clarity": "Excellent",
-                                }
-                            ],
-                        },
-                    },
-                },
-                "view_placement_analysis": {
-                    "alignment": {
-                        "horizontal_alignment": "Proper",
-                        "vertical_alignment": "Proper",
-                        "projection_method": "First angle - Correct for ISO",
-                    },
-                    "spacing": {
-                        "between_views": "Adequate",
-                        "from_dimensions": "Good",
-                        "from_annotations": "Good",
-                    },
-                    "sheet_utilization": {
-                        "coverage": "75%",
-                        "balance": "Well balanced",
-                        "wasted_space": "Minimal",
-                    },
-                },
-                "clarity_assessment": {
-                    "line_clarity": {
-                        "visible_edges": "Clear and distinct",
-                        "hidden_edges": "Properly shown with dashed lines",
-                        "centerlines": "Present where needed",
-                    },
-                    "feature_visibility": {
-                        "internal_features": "Well shown in sections",
-                        "small_features": "Detailed view provided",
-                        "complex_geometry": "Adequately represented",
-                    },
-                    "viewing_angles": {
-                        "optimal_angles": 6,
-                        "questionable_angles": 1,
-                        "suggestions": [
-                            "Consider isometric view for assembly understanding"
-                        ],
-                    },
-                },
-                "completeness_check": {
-                    "required_views": {
-                        "minimum_for_manufacture": 3,
-                        "provided": 7,
-                        "adequate": True,
-                    },
-                    "hidden_features": {
-                        "all_shown": True,
-                        "method": "Section views and hidden lines",
-                    },
-                    "critical_dimensions_visible": True,
-                    "manufacturing_features_clear": True,
-                },
-            }
-
             return {
-                "status": "success",
-                "message": "Drawing view analysis completed",
-                "view_analysis": view_analysis,
-                "quality_metrics": {
-                    "view_selection": "Excellent",
-                    "view_placement": "Good",
-                    "clarity": "Good",
-                    "completeness": "Excellent",
-                    "overall_score": 88,
-                },
-                "recommendations": [
-                    "Consider adding isometric view for better understanding",
-                    "Ensure all critical dimensions are clearly visible",
-                    "Review spacing around detail view C",
-                ],
+                "status": "error",
+                "message": (
+                    "Cannot analyze views: this adapter does not implement "
+                    "analyze_drawing_views, so the drawing was never opened."
+                ),
             }
 
         except Exception as e:
@@ -864,105 +456,13 @@ async def register_drawing_analysis_tools(
                     "message": result.error or "Failed to generate drawing report",
                 }
 
-            drawing_path = input_data.get("drawing_path", "")
-            report_type = input_data.get(
-                "report_type", "full"
-            )  # full, summary, issues_only
-
-            drawing_report = {
-                "report_header": {
-                    "report_title": "SolidWorks Drawing Quality Analysis Report",
-                    "drawing_file": drawing_path,
-                    "analysis_date": "2024-01-15 14:30:00",
-                    "report_type": report_type,
-                    "generated_by": "SolidWorks MCP Server",
-                    "analysis_version": "2.1.0",
-                },
-                "executive_summary": {
-                    "overall_quality_score": 84,
-                    "quality_grade": "B+",
-                    "major_strengths": [
-                        "Excellent view selection and clarity",
-                        "Good standards compliance",
-                        "Complete dimensioning",
-                    ],
-                    "key_improvement_areas": [
-                        "Dimension precision consistency",
-                        "Text formatting standardization",
-                        "Title block completeness",
-                    ],
-                    "recommendation": "Drawing is of good quality with minor improvements recommended",
-                },
-                "detailed_scores": {
-                    "view_quality": {"score": 88, "grade": "A-"},
-                    "dimension_quality": {"score": 78, "grade": "B"},
-                    "annotation_quality": {"score": 86, "grade": "B+"},
-                    "standards_compliance": {"score": 82, "grade": "B"},
-                    "completeness": {"score": 90, "grade": "A-"},
-                },
-                "critical_issues": [
-                    {
-                        "issue": "Missing approval signatures",
-                        "severity": "High",
-                        "location": "Title block",
-                        "recommendation": "Add checked by and approved by signatures",
-                    }
-                ],
-                "warnings": [
-                    {
-                        "issue": "Inconsistent dimension precision",
-                        "severity": "Medium",
-                        "location": "Throughout drawing",
-                        "recommendation": "Standardize to 2 decimal places",
-                    },
-                    {
-                        "issue": "Non-standard text height",
-                        "severity": "Low",
-                        "location": "General note 3",
-                        "recommendation": "Use 2.5mm minimum height",
-                    },
-                ],
-                "improvement_plan": {
-                    "immediate_actions": [
-                        "Add missing approval signatures",
-                        "Correct text height in general note 3",
-                    ],
-                    "short_term_actions": [
-                        "Standardize dimension precision",
-                        "Review and update text formatting",
-                    ],
-                    "long_term_actions": [
-                        "Implement drawing template improvements",
-                        "Establish drawing review checklist",
-                    ],
-                },
-                "compliance_certification": {
-                    "certifiable": False,
-                    "certification_standard": "ISO 128",
-                    "required_score": 85,
-                    "current_score": 84,
-                    "gap_analysis": "1 point improvement needed",
-                    "certification_blockers": ["Missing approval signatures"],
-                },
-            }
-
             return {
-                "status": "success",
-                "message": "Drawing quality report generated successfully",
-                "drawing_report": drawing_report,
-                "report_stats": {
-                    "total_checks_performed": 47,
-                    "critical_issues_found": 1,
-                    "warnings_found": 2,
-                    "suggestions_provided": 8,
-                    "report_completeness": "100%",
-                },
-                "next_steps": [
-                    "Review critical issues and warnings",
-                    "Implement immediate action items",
-                    "Schedule follow-up analysis after corrections",
-                    "Consider template improvements for future drawings",
-                ],
+                "status": "error",
+                "message": (
+                    "Cannot generate a drawing report: this adapter does not "
+                    "implement generate_drawing_report, so there is nothing to "
+                    "report on."
+                ),
             }
 
         except Exception as e:
