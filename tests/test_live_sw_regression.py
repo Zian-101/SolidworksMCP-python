@@ -1798,7 +1798,12 @@ async def test_exit_sketch_clears_leftover_sw_sketch_live(
 
         # SW still has the sketch open (verify before the actual exercise).
         def _probe_sw_state() -> object:
-            return adapter.swApp.ActiveDoc.GetActiveSketch2()
+            # Must go through the method-flagged ``currentModel``. A bare
+            # ``swApp.ActiveDoc`` is a fresh, unflagged dispatch whose
+            # ``GetActiveSketch2`` raises "Member not found" instead of
+            # returning the sketch. The staging above nulls the sketch
+            # handles but deliberately leaves ``currentModel`` intact.
+            return adapter.currentModel.GetActiveSketch2()
 
         pre = adapter._handle_com_operation("probe_pre_exit", _probe_sw_state)
         assert pre.is_success and pre.data is not None, (

@@ -1132,7 +1132,14 @@ def _add_sketch_constraint_impl(
                 default=0,
             )
 
+        # Prefer the method-flagged ``currentModel`` dispatch. ``swApp.ActiveDoc``
+        # returns a fresh, unflagged dispatch every time, so its
+        # ``GetActiveSketch2`` resolves as a property value rather than a method
+        # and ``_attempt`` swallows the TypeError into ``None`` — which reads as
+        # "no active sketch" even while one is open.
         active_sketch = adapter._attempt(
+            lambda: adapter.currentModel.GetActiveSketch2(), default=None
+        ) or adapter._attempt(
             lambda: adapter.swApp.ActiveDoc.GetActiveSketch2(), default=None
         )
         if active_sketch is None:
@@ -2145,7 +2152,15 @@ def _exit_sketch_impl(adapter: Any) -> AdapterResult[None]:
                 default=0,
             )
 
-        sw_active = adapter._attempt(lambda: adapter.swApp.ActiveDoc.GetActiveSketch2())
+        # Query the object that was just flagged. ``swApp.ActiveDoc`` hands
+        # back a fresh, unflagged dispatch, so the flagging above does not
+        # apply to it and ``GetActiveSketch2`` raises "Member not found" —
+        # which ``_attempt`` turns into ``None``, i.e. "nothing open". That
+        # defeated the entire purpose of this function: a leftover SW-side
+        # sketch was reported as "No active sketch to exit".
+        sw_active = adapter._attempt(
+            lambda: adapter.currentModel.GetActiveSketch2()
+        ) or adapter._attempt(lambda: adapter.swApp.ActiveDoc.GetActiveSketch2())
         adapter_active = adapter.currentSketchManager
 
         # Already out of sketch-edit mode — clean up adapter state so a

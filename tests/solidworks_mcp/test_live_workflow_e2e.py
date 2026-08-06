@@ -39,14 +39,35 @@ def _ok(payload: dict, label: str) -> dict:
 @pytest.fixture
 async def tools():
     """Boot the server, register every tool and open the COM connection."""
-    from solidworks_mcp.config import load_config
+    from solidworks_mcp.config import AdapterType, load_config
     from solidworks_mcp.server import SolidWorksMCPServer
 
-    server = SolidWorksMCPServer(config=load_config())
+    # tests/conftest.py sets USE_MOCK_SOLIDWORKS=true at import time for the
+    # whole session, so a plain load_config() here hands back the mock adapter.
+    # This test exists specifically to drive the real tool layer against real
+    # SolidWorks; on the mock it asserted against invented numbers and proved
+    # nothing. Force the COM adapter explicitly.
+    # AdapterFactory._determine_adapter_type returns MOCK whenever
+    # `config.testing or config.mock_solidworks` is set, before it ever looks
+    # at adapter_type, so all three have to be cleared.
+    os.environ.pop("USE_MOCK_SOLIDWORKS", None)
+    config = load_config()
+    config.adapter_type = AdapterType.PYWIN32
+    config.testing = False
+    config.mock_solidworks = False
+
+    server = SolidWorksMCPServer(config=config)
     await server.setup()
     adapter = getattr(server, "adapter", None)
     if adapter is not None and not adapter.is_connected():
         await adapter.connect()
+
+    # Deliberately no CloseAllDocuments here. Closing every open document
+    # reaches across the whole SolidWorks application, including documents
+    # held by the adapter that tests/test_live_sw_regression.py is using, and
+    # made three of its sketch tests fail with "Member not found" purely from
+    # test ordering. This test creates its own part, so it does not need the
+    # session emptied first.
     yield {tool.name: tool.fn for tool in await server.mcp.list_tools()}
 
 
