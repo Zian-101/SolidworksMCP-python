@@ -191,6 +191,17 @@ def _make_component_module() -> types.ModuleType:
 def _install_prefab_stubs() -> None:
     """Test install prefab stubs."""
 
+    # Warm the *real* solidworks_mcp.ui package cache before shadowing
+    # solidworks_mcp.ui.schemas with a stub. solidworks_mcp/ui/__init__.py
+    # transitively imports the real schemas module (DashboardCheckpoint,
+    # DashboardEvidenceRow, ...); if that package hasn't been imported for
+    # real yet and our stub schemas module (only DashboardUIState) is
+    # already installed in sys.modules, the package __init__ import chain
+    # breaks with ImportError. Once the real package is cached, overwriting
+    # sys.modules["solidworks_mcp.ui.schemas"] afterwards is safe because
+    # the prefab modules only import DashboardUIState from it directly.
+    importlib.import_module("solidworks_mcp.ui")
+
     prefab_ui = types.ModuleType("prefab_ui")
     prefab_ui.PrefabApp = _Ctx
 
