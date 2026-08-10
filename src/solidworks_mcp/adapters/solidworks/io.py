@@ -2038,7 +2038,10 @@ class SolidWorksIOMixin:
             return ""
 
         root = exe if os.path.isdir(exe) else os.path.dirname(exe)
-        for language in ("english", "Engl.ish"):
+        # Only "english" is worth special-casing; any other locale is found by
+        # the lang/ directory walk below. A second entry here used to read
+        # "Engl.ish", which no install directory can ever match.
+        for language in ("english",):
             candidate = os.path.join(
                 root, "lang", language, "sldmaterials", "solidworks materials.sldmat"
             )
