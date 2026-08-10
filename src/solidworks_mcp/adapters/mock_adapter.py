@@ -1175,9 +1175,7 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
         if math.hypot(direction_x, direction_y) < 1e-9:
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,
-                error=(
-                    "sketch_linear_pattern requires a non-zero direction vector"
-                ),
+                error=("sketch_linear_pattern requires a non-zero direction vector"),
             )
         for ent in entities:
             if ent not in self._sketch_entity_ids:
@@ -1247,9 +1245,7 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
         await asyncio.sleep(self._delays["sketch_operation"] / 2)
         self._operation_count += 1
 
-        pattern_id = (
-            f"CircularPattern_{count}x{angle}deg_{random.randint(1000, 9999)}"
-        )
+        pattern_id = f"CircularPattern_{count}x{angle}deg_{random.randint(1000, 9999)}"
         return AdapterResult(
             status=AdapterResultStatus.SUCCESS,
             data=pattern_id,
@@ -1281,8 +1277,7 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             return AdapterResult(
                 status=AdapterResultStatus.ERROR,
                 error=(
-                    "sketch_mirror requires a mirror_line entity ID "
-                    "(add_centerline)"
+                    "sketch_mirror requires a mirror_line entity ID (add_centerline)"
                 ),
             )
         if mirror_line not in self._sketch_entity_ids:
@@ -1370,9 +1365,7 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
         self._operation_count += 1
 
         direction = "inward" if reverse_direction else "outward"
-        offset_id = (
-            f"Offset_{offset_distance}_{direction}_{random.randint(1000, 9999)}"
-        )
+        offset_id = f"Offset_{offset_distance}_{direction}_{random.randint(1000, 9999)}"
         return AdapterResult(
             status=AdapterResultStatus.SUCCESS,
             data=offset_id,
@@ -2348,6 +2341,46 @@ class MockSolidWorksAdapter(SolidWorksAdapter):
             },
             execution_time=0.3,
             metadata={"mock": True, "orientation": orientation},
+        )
+
+    async def pack_and_go_assembly(
+        self,
+        source_path: str,
+        target_dir: str,
+    ) -> AdapterResult[dict]:
+        """Mock Pack-and-Go: simulate copying an assembly to a target directory.
+
+        Args:
+            source_path (str): Path to the source .sldasm file.
+            target_dir (str): Directory to copy files into.
+
+        Returns:
+            AdapterResult[dict]: Simulated pack-and-go result.
+        """
+        import pathlib
+
+        await asyncio.sleep(0.05)
+        self._operation_count += 1
+
+        source = pathlib.Path(source_path)
+        out_dir = pathlib.Path(target_dir)
+        mock_parts = [f"MockPart{i}.SLDPRT" for i in range(1, 3)]
+        source_files = [str(source)] + [str(source.parent / p) for p in mock_parts]
+        copied_files = [str(out_dir / source.name)] + [
+            str(out_dir / p) for p in mock_parts
+        ]
+        return AdapterResult(
+            status=AdapterResultStatus.SUCCESS,
+            data={
+                "source_assembly": str(source),
+                "target_dir": str(out_dir),
+                "copied_files": copied_files,
+                "source_files": source_files,
+                "save_statuses": [0] * (len(mock_parts) + 1),
+                "all_files_saved": True,
+            },
+            execution_time=0.05,
+            metadata={"mock": True},
         )
 
     async def export_file(

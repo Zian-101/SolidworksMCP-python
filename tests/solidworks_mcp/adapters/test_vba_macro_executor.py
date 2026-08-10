@@ -18,7 +18,11 @@ async def test_execute_macro_records_error_on_exception(monkeypatch, tmp_path) -
     """execute_macro should return error AdapterResult when execution fails."""
     # Force _execute_via_adapter to raise and assert error result.
     executor = VbaMacroExecutor(temp_macro_dir=tmp_path)
-    monkeypatch.setattr(executor, "_execute_via_adapter", lambda **_kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        executor,
+        "_execute_via_adapter",
+        lambda **_kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
 
     request = MacroExecutionRequest(macro_code="code", macro_name="Macro")
     result = await executor.execute_macro(request, backing_adapter=SimpleNamespace())

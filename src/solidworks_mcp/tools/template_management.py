@@ -152,7 +152,7 @@ def _save_library(library: dict[str, Any]) -> None:
 
 
 async def register_template_management_tools(
-    mcp: FastMCP, adapter: SolidWorksAdapter, config
+    mcp: FastMCP, adapter: SolidWorksAdapter, config: Any
 ) -> int:
     """Register template management tools with FastMCP.
 

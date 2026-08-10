@@ -22,11 +22,14 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from ...agents.history_db import (
+from ...agents.history_db import (  # noqa: F401
     get_design_session,
     insert_evidence_link,
     insert_tool_call_record,
     replace_plan_checkpoints,
+    # Not referenced in this module, but tests monkeypatch
+    # `llm_service.upsert_design_session`, so the name has to exist here.
+    upsert_design_session,
 )
 from ._utils import (
     DEFAULT_API_ORIGIN,
@@ -471,8 +474,8 @@ async def _run_structured_agent(
             pass
         toolsets = [MCPServerStreamableHTTP(mcp_server_url, **mcp_kwargs)]
 
-    _ensure_provider_credentials(resolved_model, resolved_endpoint)
     try:
+        _ensure_provider_credentials(resolved_model, resolved_endpoint)
         configured_model = _build_agent_model(resolved_model, resolved_endpoint)
         agent = Agent(
             configured_model,

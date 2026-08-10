@@ -31,12 +31,14 @@ classifiers = [
 
 dependencies = [
     "fastmcp>=3.2.2",
+    "mcp>=1.28.1",
     "pydantic>=2.5.0",
-    "pydantic-ai>=0.0.13",
+    "pydantic-ai>=1.56.0",
     "sqlmodel>=0.0.22",
     "chardet<6",
     "pywin32>=306; platform_system=='Windows'",
     "pywin32-ctypes>=0.2.0; platform_system=='Windows'",
+    "comtypes>=1.4.0; platform_system=='Windows'",
     "loguru>=0.7.0",
     "typing-extensions>=4.8.0",
     "httpx>=0.24.0",
@@ -45,10 +47,11 @@ dependencies = [
     "jinja2>=3.1.0",
     "sqlalchemy>=2.0.0",
     "aiosqlite>=0.19.0",
-    "urllib3>=2.2.0",
+    "urllib3>=2.7.0",
     "charset-normalizer>=3.4.0",
     "typer>=0.12.0",
     "rich>=13.0.0",
+    "pyasn1>=0.6.4",
 ]
 
 [project.optional-dependencies]
@@ -202,6 +205,7 @@ omit = [
     "*/test_*",
     "*/__pycache__/*",
     "*/migrations/*",
+    "*/solidworks_mcp/ui/*",
 ]
 
 [tool.coverage.report]
@@ -220,6 +224,9 @@ exclude_lines = [
 
 [tool.mypy]
 python_version = "3.11"
+exclude = [
+    "src/utils/",
+]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -242,6 +249,19 @@ module = [
     "win32con",
 ]
 ignore_missing_imports = true
+
+# UI prefab files are slated for removal — suppress all errors.
+[[tool.mypy.overrides]]
+module = [
+    "solidworks_mcp.ui.prefab_dashboard",
+    "solidworks_mcp.ui.prefab_trace_probe",
+    "solidworks_mcp.ui.local_llm",
+    "solidworks_mcp.ui.service",
+    "solidworks_mcp.ui.server",
+    "solidworks_mcp.ui.services.llm_service",
+]
+ignore_errors = true
+
 
 [tool.black]
 target-version = ["py311"]

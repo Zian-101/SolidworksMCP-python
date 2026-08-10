@@ -678,9 +678,7 @@ class TestPyWin32AdapterBranches:
         assert (
             await adapter.sketch_linear_pattern(["L1"], 1.0, 0.0, 5.0, 3)
         ).is_success
-        assert (
-            await adapter.sketch_circular_pattern(["L1"], 180.0, 4)
-        ).is_success
+        assert (await adapter.sketch_circular_pattern(["L1"], 180.0, 4)).is_success
         assert (await adapter.sketch_mirror(["L1"], "Centerline_42")).is_success
         assert (await adapter.sketch_offset(["L1"], 1.0, True)).is_success
 
@@ -968,6 +966,7 @@ class TestPyWin32AdapterBranches:
             FeatureCut3=Mock(return_value=feature_obj),
             FeatureFillet3=Mock(return_value=feature_obj),
             FeatureChamfer=Mock(return_value=feature_obj),
+            InsertFeatureChamfer=Mock(return_value=feature_obj),
         )
         mass_props = SimpleNamespace(
             Volume=2.0e-9,
@@ -984,6 +983,7 @@ class TestPyWin32AdapterBranches:
             Extension=extension,
             SketchManager=sketch_manager,
             FeatureManager=feature_manager,
+            ClearSelection2=Mock(return_value=True),
         )
 
         created_sketch = await adapter.create_sketch("XY")
@@ -1102,6 +1102,7 @@ class TestPyWin32AdapterBranches:
             FeatureCut3=Mock(return_value=feature_obj),
             FeatureFillet3=Mock(return_value=feature_obj),
             FeatureChamfer=Mock(return_value=feature_obj),
+            InsertFeatureChamfer=Mock(return_value=feature_obj),
         )
         sketch_manager = SimpleNamespace(
             InsertSketch=Mock(return_value=SimpleNamespace(Name="SketchA")),
@@ -1116,6 +1117,7 @@ class TestPyWin32AdapterBranches:
             Extension=extension,
             SketchManager=sketch_manager,
             FeatureManager=feature_manager,
+            ClearSelection2=Mock(return_value=True),
             GetMassProperties=(
                 0.001,
                 0.002,
@@ -1400,7 +1402,9 @@ class TestPyWin32AdapterBranches:
         fillet_select_fail = await adapter.add_fillet(1.0, ["Edge1"])
         chamfer_select_fail = await adapter.add_chamfer(1.0, ["Edge1"])
         assert fillet_select_fail.is_error
-        assert "Failed to select any of the named edge" in (fillet_select_fail.error or "")
+        # Upstream's add_fillet reports the first edge it could not select,
+        # rather than only complaining once every named edge has failed.
+        assert "Failed to select edge" in (fillet_select_fail.error or "")
         assert chamfer_select_fail.is_error
         assert "Failed to select edge" in (chamfer_select_fail.error or "")
 
@@ -2593,10 +2597,8 @@ class TestPyWin32AdapterBranches:
             if name in fail:
                 return None
             feature = SimpleNamespace()
-            feature.Select2 = (
-                lambda append, mark, _n=name: bool(
-                    selected.append((_n, append, mark)) or True
-                )
+            feature.Select2 = lambda append, mark, _n=name: bool(
+                selected.append((_n, append, mark)) or True
             )
             return feature
 
@@ -2718,9 +2720,7 @@ class TestPyWin32AdapterBranches:
         assert "Sketch1" in (result.error or "")
 
     @pytest.mark.asyncio
-    async def test_create_loft_no_model_and_too_few_profiles(
-        self, monkeypatch
-    ) -> None:
+    async def test_create_loft_no_model_and_too_few_profiles(self, monkeypatch) -> None:
         """create_loft guards: no active model, then fewer than two profiles."""
         adapter = self._build_adapter(monkeypatch)
 
@@ -2852,9 +2852,7 @@ class TestPyWin32AdapterBranches:
         adapter.currentSketchManager = None
         assert (await adapter.add_sketch_dimension("L1", None, "linear", 10.0)).is_error
         assert (await adapter.sketch_linear_pattern(["L1"], 1.0, 0.0, 5.0, 3)).is_error
-        assert (
-            await adapter.sketch_circular_pattern(["L1"], 180.0, 4)
-        ).is_error
+        assert (await adapter.sketch_circular_pattern(["L1"], 180.0, 4)).is_error
         assert (await adapter.sketch_mirror(["L1"], "CL1")).is_error
         assert (await adapter.sketch_offset(["L1"], 1.0, True)).is_error
 

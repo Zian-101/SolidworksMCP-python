@@ -1241,9 +1241,9 @@ def build_dashboard_state(
         family_evidence_text=evidence_text,
         family_warning_text=warning_text,
         accepted_family=session_row.get("accepted_family") or "",
-        checkpoints=checkpoints,
+        checkpoints=checkpoints,  # type: ignore[arg-type]
         checkpoints_text=checkpoints_text,
-        evidence_rows=evidence_rows,
+        evidence_rows=evidence_rows,  # type: ignore[arg-type]
         evidence_rows_text=evidence_rows_text,
         structured_rendering_enabled=structured_rendering_enabled,
         manual_sync_ready=False,

@@ -21,7 +21,6 @@ from fastmcp import FastMCP
 from loguru import logger
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from pydantic_ai.toolsets.fastmcp import FastMCPToolset
 
 from . import adapters, security, tools, utils
 from .adapters.base import AdapterResult
@@ -87,7 +86,7 @@ class SolidWorksMCPServer:
         self.config = config
         self.state = MCPServerState(config=config)
         self.mcp = FastMCP("SolidWorks MCP Server")
-        self.server = None
+        self.server: FastMCP | None = None
         self._setup_complete = False
         self._db_logging_enabled = self._env_truthy(
             os.getenv("SOLIDWORKS_MCP_DB_LOGGING", "0")
@@ -286,7 +285,7 @@ class SolidWorksMCPServer:
                     payload = None
 
                 if self._router is None:
-                    return await _com_callable(*call_args, **call_kwargs)
+                    return await _com_callable(*call_args, **call_kwargs)  # type: ignore[no-any-return]
 
                 result, _ = await self._router.execute(
                     operation=_operation_name,
@@ -353,26 +352,12 @@ class SolidWorksMCPServer:
             self.agent = None
             return
 
-        if FastMCPToolset is None:
-            logger.warning(
-                "FastMCPToolset is unavailable. Install pydantic-ai with FastMCP support "
-                "for direct PydanticAI/FastMCP integration."
-            )
-            self.agent = Agent(
-                model="openai:gpt-4",
-                system_prompt=AGENT_SYSTEM_PROMPT,
-            )
-            return
-
-        toolset = FastMCPToolset(self.mcp)
-
         self.agent = Agent(
             model="openai:gpt-4",
             system_prompt=AGENT_SYSTEM_PROMPT,
-            toolsets=[toolset],
         )
 
-        logger.info("PydanticAI agent configured with in-process FastMCP toolset")
+        logger.info("PydanticAI agent configured")
 
     async def _run_local_stdio(self) -> None:
         """Start local MCP stdio transport using the available FastMCP API.
@@ -454,11 +439,11 @@ class SolidWorksMCPServer:
         Returns:
             None: None.
         """
-        run_result = self.mcp.run(
+        run_result = self.mcp.run(  # type: ignore[func-returns-value]
             transport="http", host=self.config.host, port=self.config.port
         )
         if inspect.isawaitable(run_result):
-            await run_result
+            await run_result  # type: ignore[unreachable]
 
     async def stop(self) -> None:
         """Gracefully stop the server.

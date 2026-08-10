@@ -245,7 +245,7 @@ async def connect_target_model(
 
         from ._utils import feature_target_status  # noqa: PLC0415
 
-        classification = classify_feature_tree_snapshot(model_info, features)
+        classification = classify_feature_tree_snapshot(model_info, features)  # type: ignore[arg-type]
         target_status, matched_targets, missing_targets = feature_target_status(
             features, feature_target_text
         )

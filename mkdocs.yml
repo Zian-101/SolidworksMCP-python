@@ -59,6 +59,7 @@ nav:
       - Worked Examples: agents/worked-examples.md
       - Prompt-Driven Design: agents/prompt-driven-design.md
       - Prompting Tutorials: agents/prompting-tutorials.md
+      - COM API Pitfalls (LLM Agent Guide): agents/com-api-pitfalls.md
   - API Reference: api/
 
 # Theme configuration
@@ -76,9 +77,6 @@ theme:
     - navigation.path
     - navigation.footer
     - navigation.indexes
-    - navigation.instant
-    - navigation.instant.prefetch
-    - navigation.instant.progress
     - navigation.sections
     - navigation.tabs
     - navigation.tracking
@@ -142,8 +140,6 @@ plugins:
             show_signature: true
             show_signature_annotations: true
             separate_signature: true
-  - mermaid2:
-      javascript: https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js
 
 # Extensions
 markdown_extensions:
@@ -187,6 +183,9 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
+  - pymdownx.snippets:
+      base_path: ['.']
+      check_paths: false
   - pymdownx.tilde
   - sane_lists
 
@@ -206,9 +205,7 @@ extra_css:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
-  - javascripts/extra.js
 
 # Copyright
 copyright: |

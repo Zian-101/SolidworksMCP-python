@@ -327,9 +327,7 @@ class TestSolidWorksMCPServer:
                     "solidworks_mcp.adapters.create_adapter",
                     return_value=mock_adapter,
                 ):
-                    with patch(
-                        "solidworks_mcp.tools.register_tools", return_value=10
-                    ):
+                    with patch("solidworks_mcp.tools.register_tools", return_value=10):
                         await server.setup()
 
         # Server should be set up
@@ -391,9 +389,7 @@ class TestSolidWorksMCPServer:
                     "solidworks_mcp.adapters.create_adapter",
                     return_value=mock_adapter,
                 ):
-                    with patch(
-                        "solidworks_mcp.tools.register_tools", return_value=5
-                    ):
+                    with patch("solidworks_mcp.tools.register_tools", return_value=5):
                         with patch.object(server, "_start_http_server"):
                             # Server should start despite adapter connection failure
                             await server.start()
@@ -412,33 +408,23 @@ class TestSolidWorksMCPServer:
         assert server.agent is None
 
     @pytest.mark.asyncio
-    async def test_setup_agent_fallback_without_fastmcp_toolset(self):
-        """Test agent fallback path when FastMCP toolset integration is unavailable."""
+    async def test_setup_agent_creates_agent_without_toolsets(self):
+        """Test that PydanticAI agent is created without FastMCP toolsets."""
         config = SolidWorksMCPConfig(testing=False, mock_solidworks=False)
         server = SolidWorksMCPServer(config)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
-            with patch("solidworks_mcp.server.FastMCPToolset", None):
-                with patch("solidworks_mcp.server.Agent") as mock_agent:
-                    await server._setup_agent()
+            with patch("solidworks_mcp.server.Agent") as mock_agent:
+                await server._setup_agent()
 
+        # Agent should be called with model and system_prompt, but NOT toolsets
         mock_agent.assert_called_once()
-        assert server.agent is mock_agent.return_value
-
-    @pytest.mark.asyncio
-    async def test_setup_agent_with_fastmcp_toolset(self):
-        """Test direct FastMCP toolset binding path for the PydanticAI agent."""
-        config = SolidWorksMCPConfig(testing=False, mock_solidworks=False)
-        server = SolidWorksMCPServer(config)
-
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
-            with patch("solidworks_mcp.server.FastMCPToolset") as mock_toolset:
-                with patch("solidworks_mcp.server.Agent") as mock_agent:
-                    mock_toolset.return_value = "toolset"
-                    await server._setup_agent()
-
-        mock_toolset.assert_called_once_with(server.mcp)
-        assert mock_agent.call_args.kwargs["toolsets"] == ["toolset"]
+        call_kwargs = mock_agent.call_args.kwargs
+        assert "model" in call_kwargs
+        assert call_kwargs["model"] == "openai:gpt-4"
+        assert "system_prompt" in call_kwargs
+        # toolsets should not be present
+        assert "toolsets" not in call_kwargs
         assert server.agent is mock_agent.return_value
 
     @pytest.mark.asyncio
@@ -544,9 +530,7 @@ def test_create_server_uses_loader_when_config_missing():
         mock_load.return_value = SolidWorksMCPConfig(port=9123)
         server = SolidWorksMCPServer(mock_load.return_value)
 
-        with patch(
-            "solidworks_mcp.server.SolidWorksMCPServer", return_value=server
-        ):
+        with patch("solidworks_mcp.server.SolidWorksMCPServer", return_value=server):
             created = __import__(
                 "solidworks_mcp.server", fromlist=["create_server"]
             ).create_server()
@@ -557,9 +541,7 @@ def test_create_server_uses_loader_when_config_missing():
 
 def test_run_server_exits_on_unhandled_exception():
     """Test synchronous entrypoint exits with status 1 on fatal errors."""
-    with patch(
-        "solidworks_mcp.server.asyncio.run", side_effect=RuntimeError("boom")
-    ):
+    with patch("solidworks_mcp.server.asyncio.run", side_effect=RuntimeError("boom")):
         with patch("solidworks_mcp.server.sys.exit") as mock_exit:
             from solidworks_mcp.server import run_server
 
@@ -618,9 +600,7 @@ class TestServerIntegration:
 
             with patch("solidworks_mcp.utils.validate_environment"):
                 with patch("solidworks_mcp.security.setup_security"):
-                    with patch(
-                        "solidworks_mcp.tools.register_tools", return_value=10
-                    ):
+                    with patch("solidworks_mcp.tools.register_tools", return_value=10):
                         # First setup attempt should fail
                         with pytest.raises(RuntimeError):
                             await server.setup()
@@ -726,9 +706,7 @@ class TestServerFastMCPEdgeCases:
 
 def test_run_server_keyboard_interrupt_is_silent():
     """KeyboardInterrupt in run_server should not call sys.exit."""
-    with patch(
-        "solidworks_mcp.server.asyncio.run", side_effect=KeyboardInterrupt()
-    ):
+    with patch("solidworks_mcp.server.asyncio.run", side_effect=KeyboardInterrupt()):
         with patch("solidworks_mcp.server.sys.exit") as mock_exit:
             from solidworks_mcp.server import run_server
 
@@ -985,9 +963,7 @@ def test_cli_applies_overrides_and_runs_with_loaded_config():
     from solidworks_mcp.server import cli
 
     with patch("solidworks_mcp.server.load_config", return_value=cfg):
-        with patch(
-            "solidworks_mcp.server._run_with_config", new=_fake_run_with_config
-        ):
+        with patch("solidworks_mcp.server._run_with_config", new=_fake_run_with_config):
             cli(
                 config=None,
                 mode="remote",

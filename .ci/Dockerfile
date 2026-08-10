@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/opt/conda/pkgs,uid=1000,gid=1000 \
 # Cache mount avoids re-downloading wheels on dep bumps.
 # Skips `docs` extras — MkDocs/Sphinx are not needed to run tests.
 COPY --chown=mambauser:mambauser pyproject.toml /workspace/
+COPY --chown=mambauser:mambauser README.md /workspace/
 COPY --chown=mambauser:mambauser src/ /workspace/src/
 RUN --mount=type=cache,target=/home/mambauser/.cache/pip,uid=1000,gid=1000 \
     micromamba run -n solidworks_mcp pip install -e ".[dev,test,ui,rag]"
@@ -24,5 +25,7 @@ RUN --mount=type=cache,target=/home/mambauser/.cache/pip,uid=1000,gid=1000 \
 # ── Stage 3: test sources ─────────────────────────────────────────────────────
 # Copied last so frequent edits to tests don't bust the pip cache layer.
 COPY --chown=mambauser:mambauser . /workspace
+
+USER mambauser
 
 CMD ["bash", "-lc", "micromamba run -n solidworks_mcp make test"]

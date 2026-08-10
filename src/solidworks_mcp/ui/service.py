@@ -51,21 +51,8 @@ from .services import session_service as _session_service
 # `tests/solidworks_mcp/ui/test_service_coverage_push.py`,
 # `tests/solidworks_mcp/ui/test_service_helpers.py`, and
 # `tests/solidworks_mcp/ui/test_service_new_helpers.py` import them directly.
-from .services._utils import (  # noqa: F401
-    _looks_like_path_token,
-    _trace_json_default,
-)
 from .services._utils import (
     context_file_path as _context_file_path_impl,
-)
-from .services._utils import (
-    feature_grounding_warning_text as _feature_grounding_warning_text,  # noqa: F401
-)
-from .services._utils import (
-    feature_target_status as _feature_target_status,  # noqa: F401
-)
-from .services._utils import (
-    filter_docs_text as _filter_docs_text,  # noqa: F401
 )
 from .services._utils import (
     materialize_uploaded_model as _materialize_uploaded_model_impl,
@@ -75,18 +62,6 @@ from .services._utils import (
 )
 from .services._utils import (
     normalize_feature_targets as _normalize_feature_targets,
-)
-from .services._utils import (
-    normalize_model_name_for_provider as _normalize_model_name_for_provider,  # noqa: F401
-)
-from .services._utils import (
-    parse_json_blob as _parse_json_blob,  # noqa: F401
-)
-from .services._utils import (
-    provider_from_model_name as _provider_from_model_name,  # noqa: F401
-)
-from .services._utils import (
-    provider_has_credentials as _provider_has_credentials,  # noqa: F401
 )
 from .services._utils import (
     read_reference_source as _read_reference_source,
@@ -103,31 +78,11 @@ from .services._utils import (
 from .services._utils import (
     sanitize_preview_viewer_url as _sanitize_preview_viewer_url,
 )
-from .services._utils import (
-    sanitize_ui_text as _sanitize_ui_text,  # noqa: F401
-)
-from .services._utils import (
-    trace_json as _trace_json,  # noqa: F401
-)
-from .services._utils import (
-    trace_session_row as _trace_session_row,  # noqa: F401
-)
-from .services._utils import (
-    trace_tool_records as _trace_tool_records,  # noqa: F401
-)
-from .services._utils import (
-    workflow_copy as _workflow_copy,  # noqa: F401
-)
 from .services.llm_service import (  # noqa: F401
     Agent,
-    CheckpointCandidate,
-    ClarificationResponse,
-    FamilyInspection,
     OpenAIChatModel,
     OpenAIProvider,
-    _build_agent_model,
     _ensure_provider_credentials,
-    _run_structured_agent,
 )
 from .services.session_service import (
     build_dashboard_state,
@@ -198,13 +153,14 @@ def _read_reference_source(source_path: Path) -> str:  # noqa: F811
 # Deliberately shadows the `_read_reference_url` name imported above, same
 # capture-then-shadow wrapper pattern as `_read_reference_source`.
 def _read_reference_url(source_url: str) -> tuple[str, str]:  # noqa: F811
+    parsed = urlparse(source_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"Disallowed URL scheme: {parsed.scheme!r}")
     request = Request(source_url, headers={"User-Agent": "SolidWorksMCP/1.0"})
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=20) as response:  # nosec B310
         content_type = response.headers.get_content_type()
         charset = response.headers.get_content_charset() or "utf-8"
         raw_bytes = response.read()
-
-    parsed = urlparse(source_url)
     label = Path(parsed.path).name or parsed.netloc or source_url
     suffix = Path(parsed.path).suffix.lower()
 
@@ -365,8 +321,8 @@ async def execute_next_checkpoint(
     with (
         _temporary_module_bindings(
             _session_service,
-            ensure_dashboard_session=ensure_dashboard_session,
-            build_dashboard_state=build_dashboard_state,
+            ensure_dashboard_session=ensure_dashboard_session,  # noqa: F405
+            build_dashboard_state=build_dashboard_state,  # noqa: F405
         ),
         _temporary_module_bindings(
             _checkpoint_service,
@@ -553,6 +509,20 @@ _sanitize_model_path_text = _sanitize_model_path_text
 _safe_context_name = _safe_context_name
 _normalize_feature_targets = _normalize_feature_targets
 _sanitize_preview_viewer_url = _sanitize_preview_viewer_url
+_sanitize_ui_text = _utils_service.sanitize_ui_text
+_provider_from_model_name = _utils_service.provider_from_model_name
+_workflow_copy = _utils_service.workflow_copy
+_filter_docs_text = _utils_service.filter_docs_text
+_feature_target_status = _utils_service.feature_target_status
+_feature_grounding_warning_text = _utils_service.feature_grounding_warning_text
+_parse_json_blob = _utils_service.parse_json_blob
+_trace_json_default = _utils_service._trace_json_default
+_looks_like_path_token = _utils_service._looks_like_path_token
+_normalize_model_name_for_provider = _utils_service.normalize_model_name_for_provider
+_provider_has_credentials = _utils_service.provider_has_credentials
+_trace_json = _utils_service.trace_json
+_trace_session_row = _utils_service.trace_session_row
+_trace_tool_records = _utils_service.trace_tool_records
 
 
 __all__ = [

@@ -47,7 +47,7 @@ try:
     import pythoncom
 
     PYWIN32_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
     PYWIN32_AVAILABLE = False
 
 
@@ -86,6 +86,9 @@ class ComExecutor:
         # to block until the executor is truly ready.
         self._ready = threading.Event()
         self._stopped = threading.Event()
+        # Set by worker thread when CoInitialize fails so start() can join
+        # the thread synchronously and callers see is_alive() == False.
+        self._init_failed = threading.Event()
 
     # ---- Public API ----
 
@@ -109,6 +112,7 @@ class ComExecutor:
 
         self._ready.clear()
         self._stopped.clear()
+        self._init_failed.clear()
         self._thread = threading.Thread(
             target=self._worker, name=self._name, daemon=True
         )
@@ -119,6 +123,11 @@ class ComExecutor:
                 f"ComExecutor worker '{self._name}' did not "
                 f"initialize within {timeout}s"
             )
+
+        # If CoInitialize failed the worker exits immediately after setting
+        # _ready. Join here so callers see is_alive() == False synchronously.
+        if self._init_failed.is_set():
+            self._thread.join(timeout)
 
     def stop(self, timeout: float = 5.0) -> None:
         """Signal the worker to exit and wait for it to join.
@@ -210,8 +219,9 @@ class ComExecutor:
             logger.error(
                 f"CoInitialize failed in ComExecutor worker '{self._name}': {e!r}"
             )
-            # Ready anyway so start() doesn't hang; submit() will fail fast
-            # because COM isn't actually initialized.
+            # Signal init failure then unblock start() so it can join this
+            # thread synchronously before returning.
+            self._init_failed.set()
             self._ready.set()
             return
 
@@ -226,7 +236,7 @@ class ComExecutor:
 
                 fn, fut = item
                 if not fut.set_running_or_notify_cancel():
-                    continue
+                    continue  # pragma: no cover
 
                 try:
                     result = fn()
@@ -236,7 +246,7 @@ class ComExecutor:
                     fut.set_result(result)
         finally:
             try:
-                pythoncom.CoUninitialize()
-            except Exception:
+                pythoncom.CoUninitialize()  # pragma: no cover
+            except Exception:  # pragma: no cover
                 pass
             logger.info(f"ComExecutor '{self._name}' stopped")

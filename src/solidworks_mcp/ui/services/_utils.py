@@ -752,15 +752,15 @@ class HTMLTextExtractor(HTMLParser):
         self._parts: list[str] = []
         self._skip_depth = 0
 
-    def handle_starttag(self, tag: str, attrs: list) -> None:  # type: ignore[override]
+    def handle_starttag(self, tag: str, attrs: list) -> None:
         if tag.lower() in self._SKIP_TAGS:
             self._skip_depth += 1
 
-    def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
+    def handle_endtag(self, tag: str) -> None:
         if tag.lower() in self._SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
 
-    def handle_data(self, data: str) -> None:  # type: ignore[override]
+    def handle_data(self, data: str) -> None:
         if self._skip_depth == 0:
             stripped = data.strip()
             if stripped:
@@ -873,13 +873,14 @@ def read_reference_url(source_url: str) -> tuple[str, str]:
     except ImportError:
         PdfReader = None
 
+    parsed = urlparse(source_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"Disallowed URL scheme: {parsed.scheme!r}")
     request = Request(source_url, headers={"User-Agent": "SolidWorksMCP/1.0"})
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=20) as response:  # nosec B310
         content_type = response.headers.get_content_type()
         charset = response.headers.get_content_charset() or "utf-8"
         raw_bytes = response.read()
-
-    parsed = urlparse(source_url)
     label = Path(parsed.path).name or parsed.netloc or source_url
     suffix = Path(parsed.path).suffix.lower()
 
