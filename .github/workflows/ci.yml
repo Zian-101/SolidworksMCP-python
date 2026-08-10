@@ -33,6 +33,10 @@ jobs:
         shell: bash -el {0}
         run: make test
 
+      - name: Run isolated per-file tests
+        shell: bash -el {0}
+        run: make test-isolated
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
