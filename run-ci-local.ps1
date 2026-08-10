@@ -1,5 +1,6 @@
 param(
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [string]$Target = "test"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +22,7 @@ if (-not $NoBuild) {
     }
 }
 
-Write-Host "Running local CI test command (make test)..." -ForegroundColor Cyan
+Write-Host "Running local CI test command (make $Target)..." -ForegroundColor Cyan
 $ghToken = if ($env:GH_TOKEN) {
     $env:GH_TOKEN
 } elseif ($env:GITHUB_API_KEY) {
@@ -43,7 +44,7 @@ if (-not $env:GH_TOKEN -and -not $env:GITHUB_API_KEY) {
 docker run --rm -t `
     -e "GH_TOKEN=$ghToken" `
     -e "GITHUB_API_KEY=$githubApiKey" `
-    $imageName
+    $imageName bash -lc "micromamba run -n solidworks_mcp make $Target"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Local CI container run failed."
 }

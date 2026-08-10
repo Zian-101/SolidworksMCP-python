@@ -179,41 +179,13 @@ function dev-test-isolated {
     Write-Host "Running isolated per-file tests..." -ForegroundColor Cyan
     $env:PY_KEY_VALUE_DISABLE_BEARTYPE = "true"
 
-    $venvPy = Get-VenvPython
-    if (-not (Test-Path $venvPy)) {
-        Write-Host "ERROR: .venv not found. Run: .\dev-commands.ps1 dev-install" -ForegroundColor Red
-        $global:LASTEXITCODE = 1
-        return
-    }
+    # Same driver `make test-isolated` runs, so the two cannot drift.
+    Invoke-Venv @("tests/scripts/run_isolated_tests.py")
 
-    $testsDir = Join-Path $PSScriptRoot "tests"
-    $testFiles = Get-ChildItem -Path $testsDir -Filter "test_*.py" -Recurse | Sort-Object FullName
-    $failed = @()
-
-    foreach ($f in $testFiles) {
-        $relPath = $f.FullName.Substring($PSScriptRoot.Length + 1)
-        Write-Host "==> $relPath" -ForegroundColor Yellow
-        Invoke-Pytest @(
-            $f.FullName,
-            "-m", "not solidworks_only and not smoke",
-            "--no-cov", "-q", "-p", "no:cacheprovider"
-        )
-        # pytest exit code 5 means "no tests collected" (e.g. files whose every
-        # test is marker-filtered out, or that importorskip at module level).
-        # Both 0 and 5 are success for this per-file guard; anything else is a
-        # real isolation failure.
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 5) {
-            $failed += $relPath
-        }
-    }
-
-    if ($failed.Count -gt 0) {
-        Write-Host "Isolated test failures in:" -ForegroundColor Red
-        $failed | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
-        $global:LASTEXITCODE = 1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Isolation guard passed." -ForegroundColor Green
     } else {
-        Write-Host "All $($testFiles.Count) test files passed in isolation." -ForegroundColor Green
-        $global:LASTEXITCODE = 0
+        Write-Host "Isolation guard failed." -ForegroundColor Red
     }
 }
 

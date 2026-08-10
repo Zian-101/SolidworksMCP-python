@@ -64,24 +64,8 @@ test-isolated: ## Run each test file in its own pytest process (catches cross-fi
 		echo "$(RED)Error: No conda/mamba/micromamba found$(NC)"; \
 		exit 1; \
 	fi
-	@failed=""; \
-	for f in $$(find tests -name 'test_*.py'); do \
-		echo "$(YELLOW)==>$(NC) $$f"; \
-		PY_KEY_VALUE_DISABLE_BEARTYPE=true $(CONDA_CMD) run -n solidworks_mcp python -m pytest "$$f" \
-			-m "not solidworks_only and not smoke" \
-			--no-cov -q -p no:cacheprovider; \
-		rc=$$?; \
-		if [ $$rc -ne 0 ] && [ $$rc -ne 5 ]; then \
-			failed="$$failed $$f"; \
-		fi; \
-	done; \
-	if [ -n "$$failed" ]; then \
-		echo "$(RED)Isolated test failures in:$(NC)"; \
-		for f in $$failed; do echo "  $$f"; done; \
-		exit 1; \
-	else \
-		echo "$(GREEN)All test files passed in isolation.$(NC)"; \
-	fi
+	PY_KEY_VALUE_DISABLE_BEARTYPE=true $(CONDA_CMD) run -n solidworks_mcp \
+		python tests/scripts/run_isolated_tests.py
 
 test-context-budget: ## Run smoke response-size guard test (CI-friendly)
 	@echo "$(BLUE)Running smoke response-size guard test...$(NC)"
