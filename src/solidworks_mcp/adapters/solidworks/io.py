@@ -41,6 +41,40 @@ _NAMED_VIEWS: dict[str, str] = {
 }
 
 
+class _ByrefFallback:
+    """Stand-in for a byref VARIANT when pywin32 is unavailable.
+
+    The callers' contract for a byref holder is "an object whose ``.value``
+    the COM call fills in". Returning a bare ``0`` or ``""`` broke that: on any
+    machine without pywin32 (Linux CI, mock runs) ``_read_material_name`` could
+    never read its database out-parameter back, so it silently reported
+    ``None``. This keeps the contract on both platforms.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __eq__(self, other: Any) -> bool:
+        """Compare equal to the seeded value, so callers can treat it as one."""
+        if isinstance(other, _ByrefFallback):
+            return bool(self.value == other.value)
+        return bool(self.value == other)
+
+    def __hash__(self) -> int:
+        """Hash as the seeded value."""
+        return hash(self.value)
+
+    def __bool__(self) -> bool:
+        """Truthiness follows the seeded value."""
+        return bool(self.value)
+
+    def __repr__(self) -> str:
+        """Show the seeded value for readable assertion output."""
+        return f"_ByrefFallback({self.value!r})"
+
+
 def _byref_int() -> Any:
     """Return a byref long VARIANT for a SolidWorks out-parameter.
 
@@ -52,7 +86,7 @@ def _byref_int() -> Any:
     """
     variant_ctor = getattr(getattr(win32com, "client", None), "VARIANT", None)
     if not callable(variant_ctor):
-        return 0
+        return _ByrefFallback(0)
     return variant_ctor(
         int(getattr(pythoncom, "VT_BYREF", 0)) | int(getattr(pythoncom, "VT_I4", 0)), 0
     )
@@ -249,12 +283,12 @@ def _byref_bstr() -> Any:
     ``OpenDoc6``.
 
     Returns:
-        Any: A ``VARIANT(VT_BYREF | VT_BSTR, "")``, or ``""`` when pywin32 is
-        unavailable (test/mock environments).
+        Any: A ``VARIANT(VT_BYREF | VT_BSTR, "")``, or a ``.value``-bearing
+        stand-in when pywin32 is unavailable (test/mock environments).
     """
     variant_ctor = getattr(getattr(win32com, "client", None), "VARIANT", None)
     if not callable(variant_ctor):
-        return ""
+        return _ByrefFallback("")
     return variant_ctor(
         int(getattr(pythoncom, "VT_BYREF", 0)) | int(getattr(pythoncom, "VT_BSTR", 0)),
         "",
@@ -1893,10 +1927,13 @@ class SolidWorksIOMixin:
         coincident = bool(options.get("coincident", False))
 
         def _check() -> dict[str, Any]:
-            import pythoncom
+            # Use the module-level `pythoncom`, which already degrades to a
+            # SimpleNamespace when pywin32 is absent. A local `import pythoncom`
+            # here bypassed that and raised ModuleNotFoundError on non-Windows.
+            missing = getattr(pythoncom, "Missing", None)
 
             raw = adapter.currentModel.ToolsCheckInterference2(
-                0, None, coincident, pythoncom.Missing, pythoncom.Missing
+                0, None, coincident, missing, missing
             )
 
             # Out-parameters come back appended to the return value under

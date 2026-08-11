@@ -338,9 +338,12 @@ class TestSetAppearance:
         assert result.data["color"] == {"r": 1.0, "g": 0.0, "b": 0.0}
         assert result.data["color_255"] == [255, 0, 0]
         assert result.data["transparency"] == 0.5
-        # The setter must have been reached with a real SAFEARRAY, not a bare list.
+        # The setter must have been reached with the nine values. On Windows
+        # _variant_doubles wraps them in a VARIANT SAFEARRAY; without pywin32
+        # (Linux CI) it hands back the plain list, so accept either shape.
         assert calls["set_values"] is not None
-        assert list(calls["set_values"].value) == pytest.approx(
+        passed = calls["set_values"]
+        assert list(getattr(passed, "value", passed)) == pytest.approx(
             [1.0, 0.0, 0.0, 1.0, 1.0, 0.3, 0.3, 0.5, 0.0]
         )
 
@@ -495,7 +498,8 @@ class TestByrefHelpers:
 
     def test_variant_doubles_wraps_floats_in_a_safearray(self) -> None:
         result = _variant_doubles([1, 2.5, 3])
-        assert list(result.value) == [1.0, 2.5, 3.0]
+        # VARIANT-wrapped where pywin32 exists, a plain list where it does not.
+        assert list(getattr(result, "value", result)) == [1.0, 2.5, 3.0]
 
     def test_variant_doubles_without_pywin32_returns_plain_list(self) -> None:
         with patch.object(_io_module, "win32com", SimpleNamespace(client=SimpleNamespace())):

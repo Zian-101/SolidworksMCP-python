@@ -45,6 +45,12 @@ try:
     PYWIN32_AVAILABLE = True
 except ImportError:
     PYWIN32_AVAILABLE = False
+    # Bind the names anyway. _load_wrapper() reaches its issubclass() check on
+    # paths where pywin32 is missing (non-Windows CI), and an unbound
+    # DispatchBaseClass turns that into a NameError instead of the graceful
+    # "no wrapper available" return the function is written to give.
+    DispatchBaseClass = ()  # type: ignore[assignment,misc]
+    gencache = None  # type: ignore[assignment]
 
 
 # SolidWorks type library IID (stable across SW versions).
