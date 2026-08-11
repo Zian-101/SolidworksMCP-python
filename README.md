@@ -1,6 +1,8 @@
 # SolidWorks CAD Assistant & MCP Server
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+**Languages:** [English](README.md) | [Español](README.es-ES.md)
+
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue?logo=windows)](https://www.microsoft.com/windows)
 [![SolidWorks](https://img.shields.io/badge/SolidWorks-2019--2026-red)](https://www.solidworks.com/)
@@ -58,7 +60,7 @@ When this is correct, startup logs show:
 ## Requirements
 
 - Windows 10/11 for real SolidWorks COM automation.
-- Python 3.11+ from python.org.
+- Python 3.13+ from python.org.
 - Git.
 - SolidWorks installed and launched at least once.
 
@@ -165,7 +167,7 @@ Set your LM Studio MCP config file to include this server (LM Studio expects `mc
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "C:\\Users\\andre\\OneDrive\\Documents\\GitHub\\SolidworksMCP-python\\run-mcp.ps1"
+        "C:\\path\\to\\SolidworksMCP-python\\run-mcp.ps1"
       ]
     }
   }
@@ -178,7 +180,7 @@ Alternative direct-python entry:
 {
   "mcpServers": {
     "solidworks-mcp-server": {
-      "command": "C:\\Users\\andre\\OneDrive\\Documents\\GitHub\\SolidworksMCP-python\\.venv\\Scripts\\python.exe",
+      "command": "C:\\path\\to\\SolidworksMCP-python\\.venv\\Scripts\\python.exe",
       "args": ["-m", "solidworks_mcp.server"]
     }
   }

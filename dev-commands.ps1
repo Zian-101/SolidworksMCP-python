@@ -18,6 +18,31 @@ function Get-VenvPython {
     return (Join-Path $PSScriptRoot ".venv\Scripts\python.exe")
 }
 
+function Resolve-UvCommand {
+    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uvCommand) {
+        return $uvCommand.Source
+    }
+
+    $candidatePaths = @(Join-Path $HOME ".local\bin\uv.exe")
+    if ($env:LOCALAPPDATA) {
+        $candidatePaths += Join-Path $env:LOCALAPPDATA "Programs\uv\uv.exe"
+    }
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path $candidatePath) {
+            $candidateDir = Split-Path $candidatePath -Parent
+            $pathParts = $env:Path -split ";"
+            if ($pathParts -notcontains $candidateDir) {
+                $env:Path = "$candidateDir;$env:Path"
+            }
+            return $candidatePath
+        }
+    }
+
+    return $null
+}
+
 function Ensure-Venv {
     $venvDir = Join-Path $PSScriptRoot ".venv"
     $venvCfg = Join-Path $venvDir "pyvenv.cfg"
@@ -39,9 +64,10 @@ function Ensure-Venv {
     }
 
     # Create with uv (preferred)
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $uvCmd = Resolve-UvCommand
+    if ($uvCmd) {
         Write-Host "Creating .venv with uv..." -ForegroundColor Cyan
-        uv venv .venv --python 3.11
+        & $uvCmd venv .venv --python 3.13
         if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPy)) {
             & $venvPy -m ensurepip --upgrade
             return $true
@@ -50,7 +76,7 @@ function Ensure-Venv {
 
     # Fallback: py launcher or python
     $pyCmd  = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
-    $pyArgs = if ($pyCmd -eq "py") { @("-3.11") } else { @() }
+    $pyArgs = if ($pyCmd -eq "py") { @("-3.13") } else { @() }
     Write-Host "Creating .venv with $pyCmd..." -ForegroundColor Cyan
     & $pyCmd @pyArgs -m venv .venv
     if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPy)) {
@@ -115,8 +141,10 @@ function dev-help {
 function dev-install {
     Write-Host "Installing SolidWorks MCP Server..." -ForegroundColor Cyan
 
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    $uvCmd = Resolve-UvCommand
+    if (-not $uvCmd) {
         Write-Host "ERROR: uv is required. Install from: https://docs.astral.sh/uv/" -ForegroundColor Red
+        Write-Host "Hint: installer location is usually $HOME\.local\bin\uv.exe" -ForegroundColor Yellow
         return
     }
 
@@ -124,7 +152,7 @@ function dev-install {
     if (-not $ready) { return }
 
     $venvPy = Get-VenvPython
-    uv pip install --python $venvPy -e ".[dev,test,docs,ui,rag]"
+    & $uvCmd pip install --python $venvPy -e ".[dev,test,docs,ui,rag]"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Installation complete!" -ForegroundColor Green
     } else {

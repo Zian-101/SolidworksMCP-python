@@ -6,8 +6,7 @@ This module preserves historical import paths used by tests and external callers
 
 from __future__ import annotations
 
-import os  # noqa: F401 -- re-exported; tests read `service.os`
-import subprocess  # noqa: F401 -- re-exported; tests patch `service.subprocess`
+import os  # noqa: F401 -- re-exported; test_service_helpers.py reads `service.os`
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path

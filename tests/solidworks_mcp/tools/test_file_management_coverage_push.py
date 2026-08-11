@@ -40,11 +40,13 @@ class TestGetFilePropertiesFilesystemBranches:
         result = await tools["get_file_properties"]()
         assert result["status"] == "success"
         props = result["properties"]
+        # Upstream's get_file_properties reports raw stat values: size in bytes
+        # and st_ctime/st_mtime floats. It does not emit the "file_size" MB
+        # string or the "note" field this test originally asserted.
         assert props["file_size_bytes"] == real_file.stat().st_size
-        assert props["file_size"] == f"{real_file.stat().st_size / (1024 * 1024):.2f} MB"
-        assert "modified_date" in props
-        assert "created_date" in props
-        assert "note" not in props
+        assert props["created_date"] is not None
+        assert props["modified_date"] is not None
+        assert props["file_path"] == str(real_file)
 
     @pytest.mark.asyncio
     async def test_unsaved_document_has_no_path(
@@ -66,8 +68,13 @@ class TestGetFilePropertiesFilesystemBranches:
 
         result = await tools["get_file_properties"]()
         assert result["status"] == "success"
-        assert result["properties"]["note"] == "Document has not been saved to disk yet"
-        assert "file_size_bytes" not in result["properties"]
+        props = result["properties"]
+        # An unsaved document has no path, so there are no stat values to
+        # report. The keys are present but null rather than fabricated.
+        assert props["file_path"] == ""
+        assert props["file_size_bytes"] is None
+        assert props["created_date"] is None
+        assert props["modified_date"] is None
 
     @pytest.mark.asyncio
     async def test_exception_branch(self, mcp_server, mock_adapter, mock_config):

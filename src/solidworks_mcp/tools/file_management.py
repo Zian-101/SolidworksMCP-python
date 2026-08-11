@@ -6,7 +6,6 @@ and reference management.
 
 import os
 import shutil
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -836,56 +835,59 @@ async def register_file_management_tools(
                             - Technical properties depend on document configuration
         """
         try:
-            info = await adapter.get_model_info()
-            if not info.is_success:
+            if not hasattr(adapter, "get_model_info"):
                 return {
                     "status": "error",
-                    "message": f"Failed to read active document: {info.error}",
+                    "message": "Active adapter does not support model metadata",
                 }
 
-            data = info.data if isinstance(info.data, dict) else {}
-            path_text = str(data.get("path") or "")
+            result = await adapter.get_model_info()
+            if not result.is_success or not isinstance(result.data, dict):
+                return {
+                    "status": "error",
+                    "message": result.error or "No active SolidWorks document",
+                }
 
+            model_info = dict(result.data)
+            raw_path = str(model_info.get("path") or "")
+            file_path = Path(raw_path) if raw_path else None
             properties: dict[str, Any] = {
-                "file_name": data.get("name") or data.get("title"),
-                "file_path": path_text or None,
-                "document_type": data.get("type"),
-                "configuration": data.get("configuration"),
-                "feature_count": data.get("feature_count"),
+                "file_name": (
+                    file_path.name
+                    if file_path is not None
+                    else str(model_info.get("title") or "")
+                ),
+                "file_path": raw_path,
+                "file_size_bytes": None,
+                "created_date": None,
+                "modified_date": None,
+                "document_type": model_info.get("type"),
+                "configuration": model_info.get("configuration"),
+                "is_dirty": model_info.get("is_dirty"),
+                "feature_count": model_info.get("feature_count"),
             }
 
-            # Real filesystem metadata when the document has been saved.
-            if path_text:
-                file_path = Path(path_text)
-                if file_path.exists():
-                    stat = file_path.stat()
-                    properties["file_size_bytes"] = stat.st_size
-                    properties["file_size"] = f"{stat.st_size / (1024 * 1024):.2f} MB"
-                    properties["modified_date"] = datetime.fromtimestamp(
-                        stat.st_mtime, tz=UTC
-                    ).isoformat()
-                    properties["created_date"] = datetime.fromtimestamp(
-                        stat.st_ctime, tz=UTC
-                    ).isoformat()
-                else:
-                    properties["note"] = "Document path is not on disk (unsaved?)"
-            else:
-                properties["note"] = "Document has not been saved to disk yet"
-
-            # Mass properties are the honest source for material-ish data.
-            mass = await adapter.get_mass_properties()
-            if mass.is_success and mass.data is not None:
-                properties["volume_mm3"] = getattr(mass.data, "volume", None)
-                properties["mass_kg"] = getattr(mass.data, "mass", None)
+            if file_path is not None and file_path.is_file():
+                stat = file_path.stat()
+                properties.update(
+                    {
+                        "file_size_bytes": stat.st_size,
+                        "created_date": stat.st_ctime,
+                        "modified_date": stat.st_mtime,
+                    }
+                )
 
             return {
                 "status": "success",
-                "properties": {k: v for k, v in properties.items() if v is not None},
+                "properties": properties,
+                "execution_time": result.execution_time,
             }
-
         except Exception as e:
             logger.error(f"Error in get_file_properties tool: {e}")
-            return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+            return {
+                "status": "error",
+                "message": f"Unexpected error: {str(e)}",
+            }
 
     @mcp.tool()
     async def get_model_info() -> dict[str, Any]:

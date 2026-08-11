@@ -92,3 +92,6 @@ uv.lock
 
 # Live-demo artefacts produced by scripts/demo_sketches.py
 out/
+
+# Preserved Python 3.11 environment from the 3.13 migration
+.venv311/
